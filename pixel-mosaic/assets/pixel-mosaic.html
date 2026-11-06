@@ -1,0 +1,1082 @@
+<title>픽셀 모자이크 변환기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* layout: toolbar / [settings column | two synced canvases] / palette + color decision + export. dark-first editor chrome */
+:root{
+  --bg:#141619; --panel:#1c1f24; --panel2:#23272d; --line:#2f343c; --line2:#3c424c;
+  --fg:#e7e9ed; --muted:#8e95a1; --accent:#43d6c8; --accent-ink:#0b2724; --warn:#f2b640; --danger:#ef6b6b; --fixed:#5b9cf6;
+  --checker-a:#2a2e35; --checker-b:#1f2228;
+  --ui:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#eef0f3; --panel:#ffffff; --panel2:#f5f6f8; --line:#d7dbe2; --line2:#c3c9d2;
+    --fg:#1a1d22; --muted:#5f6774; --accent:#0f9d91; --accent-ink:#ffffff; --warn:#b97a00; --danger:#c43c3c; --fixed:#2b6cd9;
+    --checker-a:#dfe2e7; --checker-b:#f3f4f6;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef0f3; --panel:#ffffff; --panel2:#f5f6f8; --line:#d7dbe2; --line2:#c3c9d2;
+  --fg:#1a1d22; --muted:#5f6774; --accent:#0f9d91; --accent-ink:#ffffff; --warn:#b97a00; --danger:#c43c3c; --fixed:#2b6cd9;
+  --checker-a:#dfe2e7; --checker-b:#f3f4f6;
+  color-scheme:light;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 var(--ui);display:flex;flex-direction:column;overflow:hidden}
+*{box-sizing:border-box}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+button.ghost{background:transparent}
+button.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+input[type=number],select{background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:4px 6px;width:64px;font-family:var(--mono);font-size:12px}
+select{width:auto;font-family:var(--ui)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-weight:600;font-size:14px;margin-right:4px}
+.hint{color:var(--muted);font-size:12px}
+.chk{display:flex;align-items:center;gap:5px;color:var(--muted);cursor:pointer}
+.filebtn{position:relative;overflow:hidden}
+.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.sep{width:1px;height:22px;background:var(--line)}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent;padding:5px 10px}
+.seg button+button{border-left:1px solid var(--line2)}
+.seg button.on{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.status{color:var(--muted);font-size:12px;margin-left:auto;font-family:var(--mono)}
+
+.body{flex:1;min-height:0;display:flex}
+.settings{width:290px;flex:none;overflow:auto;background:var(--panel);border-right:1px solid var(--line);padding-block:6px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:10px}
+.settings[hidden]{display:none}
+.settings details{border-bottom:1px solid var(--line);padding:4px 0}
+.settings summary{cursor:pointer;font-weight:600;padding:5px 0;list-style:none;display:flex;align-items:center;gap:6px}
+.settings summary::before{content:"▸";color:var(--muted);font-size:11px}
+.settings details[open] summary::before{content:"▾"}
+.settings summary .st{margin-left:auto;font-weight:400;font-size:11px;color:var(--muted);font-family:var(--mono)}
+.rows{display:flex;flex-direction:column;gap:5px;padding:2px 0 6px 14px}
+.row{display:flex;align-items:center;gap:8px;font-size:12px}
+.row>span:first-child{flex:1;color:var(--muted)}
+.row input[type=number]{width:70px}
+.row select{max-width:170px}
+.row.sub{padding-left:10px}
+.note{font-size:11px;color:var(--muted);line-height:1.4;padding:2px 0}
+.note b{color:var(--fg);font-weight:500}
+.note.ok{color:var(--accent)}
+
+.panes{flex:1;min-width:0;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
+.pane{position:relative;min-width:0;min-height:0;background:var(--bg);display:flex;flex-direction:column}
+.pane-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 12px;background:var(--panel);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);min-height:29px}
+.pane-head b{color:var(--fg);font-weight:600}
+.pane-head .mono{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.canvas-wrap{flex:1;min-height:0;position:relative;overflow:hidden;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  background-color:var(--checker-b);
+  background-image:linear-gradient(45deg,var(--checker-a) 25%,transparent 25%,transparent 75%,var(--checker-a) 75%),linear-gradient(45deg,var(--checker-a) 25%,transparent 25%,transparent 75%,var(--checker-a) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px}
+.canvas-wrap.dragging{cursor:grabbing}
+.canvas-wrap[data-tool="paint"],.canvas-wrap[data-tool="erase"],.canvas-wrap.picking{cursor:crosshair}
+.canvas-wrap.picking{box-shadow:inset 0 0 0 3px var(--fixed)}
+.canvas-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+.bottom{display:grid;grid-template-columns:minmax(0,1fr) 360px auto;gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.bottom>section{background:var(--panel);padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));min-width:0}
+.sec-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.sec-title .r{margin-left:auto;display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0}
+.swatches{display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-height:84px;overflow:auto}
+.sw{width:22px;height:22px;border-radius:4px;border:1px solid var(--line2);cursor:pointer;position:relative;padding:0;flex:none}
+.sw.focus{outline:2px solid var(--accent);outline-offset:1px}
+.sw.brush{outline:2px solid var(--warn);outline-offset:1px}
+.sw.removed{opacity:.35;border-color:var(--danger)}
+.sw.removed::after{content:"";position:absolute;left:-3px;right:-3px;top:50%;height:2px;background:var(--danger);transform:rotate(-45deg)}
+.sw.fixed{border:2px solid var(--fixed)}
+.sw.fixed::before{content:"";position:absolute;right:-1px;top:-1px;border:5px solid transparent;border-top-color:var(--fixed);border-right-color:var(--fixed)}
+.sw.unused{box-shadow:inset 0 0 0 2px var(--panel)}
+.sw-add{width:22px;height:22px;padding:0;line-height:1;font-weight:600;flex:none}
+.sw-add.on{background:var(--fixed);color:#fff;border-color:transparent}
+.legend{color:var(--muted);font-size:11px;margin-top:6px;line-height:1.5}
+.legend kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line2);border-radius:3px;padding:0 4px;font-size:10px}
+
+.insp{max-height:150px;overflow:auto;padding-right:4px;font-size:12px}
+.insp-empty{color:var(--muted);font-size:12px;padding:6px 0}
+.insp-meta{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted);margin-bottom:5px;flex-wrap:wrap;font-family:var(--mono)}
+.stage{display:flex;align-items:center;gap:8px;padding:2px 0}
+.stage i{width:14px;height:14px;border-radius:3px;border:1px solid var(--line2);display:block;flex:none}
+.stage .nm{color:var(--muted);min-width:0}
+.stage .hx{font-family:var(--mono);font-size:11px;margin-left:auto}
+.stage.last .hx,.stage.last .nm{font-weight:600;color:var(--fg)}
+.near{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;font-size:11px;color:var(--muted)}
+.near .c{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);background:var(--panel2);border:1px solid var(--line2);border-radius:999px;padding:1px 7px 1px 3px}
+.near .c i{width:12px;height:12px;border-radius:3px;border:1px solid var(--line2)}
+.near .c.pick{border-color:var(--accent)}
+.hist{display:flex;gap:3px;margin-top:4px;height:10px;border-radius:3px;overflow:hidden}
+.hist i{display:block;height:100%}
+.pick-row{display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin-top:6px}
+.pick-row .sw{width:16px;height:16px}
+.pick-row .lbl{font-size:11px;color:var(--muted);margin-right:4px}
+
+.export{display:flex;flex-direction:column;gap:6px;min-width:150px}
+.export .row{display:flex;gap:6px;align-items:center}
+.stats{font-size:11px;color:var(--muted);font-family:var(--mono)}
+
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-left,0px));z-index:20}
+.sheet{background:var(--panel);border:1px solid var(--line2);border-radius:10px;max-width:min(92vw,900px);max-height:90vh;display:flex;flex-direction:column;gap:10px;padding:14px;overflow:auto}
+.sheet img{image-rendering:pixelated;max-width:100%;max-height:60vh;border:1px solid var(--line)}
+.sheet .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:6px 12px;border-radius:6px;font-size:12px;z-index:30;pointer-events:none;max-width:90vw}
+
+@media (max-width:900px){
+  body{overflow:auto}
+  .body{flex-direction:column}
+  .settings{width:auto;max-height:42vh;border-right:0;border-bottom:1px solid var(--line);padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .panes{grid-template-columns:1fr;grid-template-rows:1fr 1fr;min-height:70vh}
+  .bottom{grid-template-columns:1fr}
+  .status{margin-left:0;width:100%}
+}
+@media (prefers-reduced-motion:no-preference){ .sw,.stage{transition:outline-color .12s,background .12s} }
+</style>
+
+<header class="bar">
+  <div class="brand">픽셀 모자이크 변환기</div>
+  <button id="toggleSettings" title="설정 칸 접기/펼치기">⚙ 설정</button>
+  <button class="filebtn">이미지 열기<input type="file" id="file" accept="image/*" aria-label="이미지 파일 선택"></button>
+  <span class="hint">Ctrl+V 붙여넣기 · 드래그 앤 드롭</span>
+  <div class="sep"></div>
+  <button id="apply" class="primary" title="왼쪽 설정으로 다시 정리합니다">▶ 정리하기</button>
+  <label class="chk"><input type="checkbox" id="auto" checked>값 바꾸면 자동</label>
+  <label class="chk"><input type="checkbox" id="grid" checked>격자</label>
+  <button id="fit">화면 맞춤</button>
+  <div class="sep"></div>
+  <div class="seg" role="group" aria-label="결과 편집 도구">
+    <button data-tool="select" class="on" title="칸 클릭으로 색 판정 보기, 드래그로 이동">선택</button>
+    <button data-tool="paint" title="붓 색으로 결과 칸 칠하기">칠하기</button>
+    <button data-tool="erase" title="결과 칸을 투명으로">지우개</button>
+  </div>
+  <button id="undo" class="ghost" title="Ctrl+Z" disabled>되돌리기</button>
+  <span class="status" id="status">이미지를 기다리는 중</span>
+</header>
+
+<div class="body">
+<aside class="settings" id="settings">
+  <details open>
+    <summary>1. 배경 지우기 <span class="st" id="st-bg"></span></summary>
+    <div class="rows">
+      <label class="row"><span>방식</span><select data-set="bgMode"><option value="none">지우지 않음</option><option value="auto">자동 (테두리에서 가장 많은 색)</option></select></label>
+      <label class="row"><span>허용 오차 (RGB 거리)</span><input type="number" data-set="bgTol" min="0" max="200" step="1"></label>
+      <label class="row"><span>테두리와 이어진 배경만</span><input type="checkbox" data-set="bgBorderOnly"></label>
+      <div class="note">원래 투명한 그림(PNG)은 테두리가 거의 투명하면 원래 투명도를 그대로 씁니다.</div>
+    </div>
+  </details>
+  <details open>
+    <summary>2. 픽셀 격자 <span class="st" id="st-grid"></span></summary>
+    <div class="rows">
+      <label class="row"><span>칸 크기 기준</span><select data-set="gridMode"><option value="auto">자동 (색 경계로 찾기)</option><option value="manual">수동 (칸 크기·오프셋)</option><option value="fixed">결과 크기 고정</option></select></label>
+      <div id="grid-auto">
+        <label class="row"><span>찾을 칸 크기 범위 (px)</span><input type="number" data-set="sMin" min="2" max="128" step="1"> ~ <input type="number" data-set="sMax" min="3" max="256" step="1"></label>
+        <label class="row"><span>색 경계로 볼 차이</span><input type="number" data-set="edgeThr" min="4" max="120" step="1"></label>
+        <div class="note" id="gridInfo">—</div>
+        <div class="row"><button id="toManual" class="ghost">찾은 값을 수동으로</button></div>
+      </div>
+      <div id="grid-manual" hidden>
+        <label class="row"><span>칸 크기 (px, 소수 가능)</span><input type="number" data-set="cellSize" min="1" max="512" step="0.25"></label>
+        <label class="row"><span>오프셋 X · Y</span><input type="number" data-set="offX" min="-512" max="512" step="1"> <input type="number" data-set="offY" min="-512" max="512" step="1"></label>
+      </div>
+      <div id="grid-fixed" hidden>
+        <label class="row"><span>결과 가로 × 세로</span><input type="number" data-set="outW" min="1" max="1024" step="1"> × <input type="number" data-set="outH" min="1" max="1024" step="1"></label>
+        <label class="row"><span>비율 고정</span><input type="checkbox" data-set="lock"></label>
+      </div>
+      <label class="row"><span>칸 경계를 실제 색 경계에 맞춤</span><input type="checkbox" data-set="snap"></label>
+      <label class="row sub"><span>최대 이동 (칸의 %)</span><input type="number" data-set="snapPct" min="0" max="49" step="1"></label>
+    </div>
+  </details>
+  <details open>
+    <summary>3. 칸 색 고르기 <span class="st" id="st-cell"></span></summary>
+    <div class="rows">
+      <label class="row"><span>방식</span><select data-set="cellMethod"><option value="mode">살짝 모은 뒤 가장 많은 색</option><option value="median">중앙값</option><option value="center">가운데 픽셀</option><option value="average">평균</option><option value="cw">중심 가중 평균</option></select></label>
+      <label class="row"><span>색 묶기 간격 (RGB)</span><input type="number" data-set="bucket" min="2" max="96" step="1"></label>
+      <label class="row"><span>칸 테두리 무시 (%)</span><input type="number" data-set="margin" min="0" max="40" step="1"></label>
+      <label class="row"><span>투명 기준 (불투명 %)</span><input type="number" data-set="alphaThr" min="1" max="100" step="1"></label>
+    </div>
+  </details>
+  <details open>
+    <summary>4. 팔레트 <span class="st" id="st-pal"></span></summary>
+    <div class="rows">
+      <label class="row"><span>방식</span><select data-set="palMode"><option value="kmeans">k-평균 (OKLab)</option><option value="oklch">OKLCH 묶기 (색 수 자동)</option><option value="mediancut">중앙 분할</option><option value="keep">원래 색 유지</option></select></label>
+      <label class="row" id="row-ncolors"><span>색 수</span><input type="number" data-set="nColors" min="2" max="64" step="1"></label>
+      <div id="row-oklch" hidden>
+        <label class="row"><span>묶을 범위 L · C · H°</span><input type="number" data-set="rL" min="0.01" max="0.5" step="0.01"> <input type="number" data-set="rC" min="0.01" max="0.5" step="0.01"> <input type="number" data-set="rH" min="1" max="180" step="1"></label>
+      </div>
+      <label class="row"><span>팔레트 색</span><select data-set="palRep"><option value="original">원본 색 (묶음에서 가장 많이 쓰인 칸 색)</option><option value="average">평균 색</option></select></label>
+      <label class="row"><span>색 거리</span><select data-set="dist"><option value="hue">OKLCh 색상 가중</option><option value="oklab">OKLab</option></select></label>
+      <label class="row sub"><span>색상 무게</span><input type="number" data-set="hueW" min="0" max="20" step="0.5"></label>
+      <label class="row"><span>명암 계열 우선</span><input type="checkbox" data-set="shade"></label>
+      <label class="row"><span>어두운 색을 외곽선 색 하나로</span><input type="checkbox" data-set="darkUnify"></label>
+      <label class="row sub"><span>외곽선 밝기 (L 이하)</span><input type="number" data-set="darkL" min="0.05" max="0.6" step="0.01"></label>
+    </div>
+  </details>
+  <details>
+    <summary>5. 정리 <span class="st" id="st-clean"></span></summary>
+    <div class="rows">
+      <label class="row"><span>외톨이 픽셀 지우기</span><input type="checkbox" data-set="isolated"></label>
+      <label class="row sub"><span>최대 대비 (OKLab, 눈동자는 남김)</span><input type="number" data-set="isoContrast" min="0.05" max="1" step="0.05"></label>
+      <label class="row"><span>1px 구멍 메우기</span><input type="checkbox" data-set="holes"></label>
+    </div>
+  </details>
+</aside>
+
+<main class="panes">
+  <section class="pane">
+    <div class="pane-head"><span><b>결과</b> · <span id="resInfo" class="mono">—</span></span><span class="mono" id="zoomInfo"></span></div>
+    <div class="canvas-wrap" id="wrapR"><canvas id="cvR"></canvas></div>
+  </section>
+  <section class="pane">
+    <div class="pane-head"><span><b>원본</b> · <span id="srcInfo" class="mono">—</span></span><span id="hoverInfo" class="mono"></span></div>
+    <div class="canvas-wrap" id="wrapS"><canvas id="cvS"></canvas></div>
+  </section>
+</main>
+</div>
+
+<footer class="bottom">
+  <section>
+    <div class="sec-title">색 <span id="palCount" class="mono"></span>
+      <span class="r"><span id="removedInfo" class="hint"></span><button id="restoreAll" class="ghost" hidden>모두 되살리기</button><button id="unfixAll" class="ghost" hidden>고정 모두 해제</button></span>
+    </div>
+    <div class="swatches" id="swatches"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+  <section>
+    <div class="sec-title">색 판정 <span class="r"><button id="clearOverride" class="ghost" hidden>직접 지정 해제</button></span></div>
+    <div class="insp" id="inspector"><div class="insp-empty">결과 픽셀이나 원본 칸을 클릭하면 그 칸의 색이 단계별로 어떻게 정해졌는지 보여줍니다.</div></div>
+  </section>
+  <section class="export">
+    <div class="sec-title">내보내기</div>
+    <div class="row"><label for="scale" class="hint">배율</label>
+      <select id="scale"><option value="1">×1 (원본 픽셀)</option><option value="4">×4</option><option value="8" selected>×8</option><option value="16">×16</option></select>
+    </div>
+    <div class="row"><button id="exportBtn" class="primary">PNG 만들기</button></div>
+    <div class="stats" id="stats"></div>
+  </section>
+</footer>
+
+<div class="overlay" id="exportOverlay" hidden>
+  <div class="sheet">
+    <div class="row"><b id="exportTitle">PNG</b><span class="hint">이미지를 우클릭해 저장하거나 복사하세요.</span></div>
+    <img id="exportImg" alt="변환된 픽셀 이미지">
+    <div class="row"><button id="copyBtn">클립보드로 복사</button><button id="closeExport">닫기</button><span class="hint" id="copyMsg"></span></div>
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+/* ======================= state ======================= */
+const S = {
+  src: null, srcW: 0, srcH: 0, srcCanvas: null, srcViewCanvas: null,
+  bg: null, bbox: null,
+  xs: null, ys: null, W: 0, H: 0, gridInfo: '', found: null,
+  cellRGB: null, cellLab: null, cellA: null,
+  palette: [], palLab: [], base: null, baseWhy: null, clean: null, cleanWhy: null,
+  removed: new Set(), fixed: [], finalIdx: null, finalWhy: null,
+  overrides: new Map(), undo: [],
+  resCanvas: null, maskCanvas: null, resImg: null,
+  view: { scale: 1, tx: 0, ty: 0 }, sel: null, hover: null,
+  tool: 'select', brush: null, picking: false, focusIdx: -1, showGrid: true, auto: true,
+  set: {
+    bgMode: 'auto', bgTol: 40, bgBorderOnly: true,
+    gridMode: 'auto', sMin: 3, sMax: 64, edgeThr: 28, cellSize: 8, offX: 0, offY: 0, outW: 64, outH: 64, lock: true, snap: true, snapPct: 35,
+    cellMethod: 'mode', bucket: 24, margin: 15, alphaThr: 50,
+    palMode: 'kmeans', nColors: 16, rL: 0.1, rC: 0.1, rH: 20, palRep: 'original', dist: 'hue', hueW: 2, shade: true, darkUnify: false, darkL: 0.24,
+    isolated: true, isoContrast: 0.25, holes: true,
+  },
+};
+let toastTimer = null;
+function toast(msg) {
+  let t = document.querySelector('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 2000);
+}
+const hex = c => '#' + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+
+/* ======================= color math (OKLab) ======================= */
+const LIN = new Float32Array(256); for (let i = 0; i < 256; i++) { const v = i / 255; LIN[i] = v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+function rgb2lab(r, g, b) {
+  const R = LIN[Math.round(r) | 0], G = LIN[Math.round(g) | 0], B = LIN[Math.round(b) | 0];
+  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B), m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B), s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+const chroma = L => Math.hypot(L[1], L[2]);
+const hueDeg = L => (Math.atan2(L[2], L[1]) * 180 / Math.PI + 360) % 360;
+const hueDiff = (h1, h2) => { const d = Math.abs(h1 - h2) % 360; return d > 180 ? 360 - d : d; };
+function labDist(a, b) {
+  const dL = a[0] - b[0], da = a[1] - b[1], db = a[2] - b[2];
+  if (S.set.dist === 'oklab') return Math.sqrt(dL * dL + da * da + db * db);
+  const dC = chroma(a) - chroma(b); const dH2 = Math.max(0, da * da + db * db - dC * dC); const w = S.set.hueW;
+  return Math.sqrt(dL * dL + dC * dC + w * w * dH2);
+}
+const okDist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+/* ======================= image loading ======================= */
+function loadFromSource(imgEl, name) {
+  const MAX = 1600;
+  let w = imgEl.naturalWidth || imgEl.width, h = imgEl.naturalHeight || imgEl.height;
+  const k = Math.min(1, MAX / Math.max(w, h));
+  w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(imgEl, 0, 0, w, h);
+  S.src = ctx.getImageData(0, 0, w, h); S.srcW = w; S.srcH = h; S.srcCanvas = c;
+  S.overrides.clear(); S.undo.length = 0; S.removed.clear(); S.fixed = []; S.sel = null; S.focusIdx = -1; S.brush = null; S.picking = false;
+  $('srcInfo').textContent = `${w}×${h}px` + (name ? ` · ${name}` : '');
+  fitViewLater = true;
+  recompute();
+}
+let fitViewLater = false;
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file); const im = new Image();
+  im.onload = () => { loadFromSource(im, file.name); URL.revokeObjectURL(url); };
+  im.src = url;
+}
+$('file').addEventListener('change', e => loadFile(e.target.files[0]));
+document.addEventListener('paste', e => {
+  const items = e.clipboardData && e.clipboardData.items; if (!items) return;
+  for (const it of items) if (it.type.startsWith('image/')) { loadFile(it.getAsFile()); e.preventDefault(); return; }
+});
+for (const id of ['wrapR', 'wrapS', 'settings']) {
+  const el = $(id);
+  el.addEventListener('dragover', e => e.preventDefault());
+  el.addEventListener('drop', e => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
+}
+
+/* ======================= 1. background ======================= */
+function computeBackground() {
+  const w = S.srcW, h = S.srcH, d = S.src.data, n = w * h, bg = new Uint8Array(n), st = S.set;
+  let borderN = 0, borderT = 0;
+  const border = []; for (let x = 0; x < w; x++) { border.push(x, (h - 1) * w + x); } for (let y = 1; y < h - 1; y++) { border.push(y * w, y * w + w - 1); }
+  for (const i of border) { borderN++; if (d[i * 4 + 3] < 128) borderT++; }
+  const useAlpha = borderT > borderN * 0.5;
+  for (let i = 0; i < n; i++) if (d[i * 4 + 3] < 128) bg[i] = 1;
+  let info = '';
+  if (st.bgMode === 'auto' && !useAlpha) {
+    const hist = new Map(); let best = null, bc = 0;
+    for (const i of border) { const o = i * 4; const key = ((d[o] >> 3) << 10) | ((d[o + 1] >> 3) << 5) | (d[o + 2] >> 3); const e = hist.get(key) || { n: 0, r: 0, g: 0, b: 0 }; e.n++; e.r += d[o]; e.g += d[o + 1]; e.b += d[o + 2]; hist.set(key, e); if (e.n > bc) { bc = e.n; best = e; } }
+    const br = best.r / best.n, bgc = best.g / best.n, bb = best.b / best.n, tol2 = st.bgTol * st.bgTol;
+    const near = i => { const o = i * 4; const dr = d[o] - br, dg = d[o + 1] - bgc, db = d[o + 2] - bb; return dr * dr + dg * dg + db * db <= tol2; };
+    if (st.bgBorderOnly) {
+      const q = new Int32Array(n); let qh = 0, qt = 0; const seen = new Uint8Array(n);
+      for (const i of border) if (!seen[i] && near(i)) { seen[i] = 1; q[qt++] = i; }
+      while (qh < qt) { const i = q[qh++]; bg[i] = 1; const x = i % w, y = (i - x) / w;
+        if (x > 0 && !seen[i - 1] && near(i - 1)) { seen[i - 1] = 1; q[qt++] = i - 1; }
+        if (x < w - 1 && !seen[i + 1] && near(i + 1)) { seen[i + 1] = 1; q[qt++] = i + 1; }
+        if (y > 0 && !seen[i - w] && near(i - w)) { seen[i - w] = 1; q[qt++] = i - w; }
+        if (y < h - 1 && !seen[i + w] && near(i + w)) { seen[i + w] = 1; q[qt++] = i + w; } }
+    } else { for (let i = 0; i < n; i++) if (near(i)) bg[i] = 1; }
+    info = `배경색 ${hex([br, bgc, bb])}`;
+  } else info = useAlpha ? '원래 투명도 사용' : '지우지 않음';
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let i = 0; i < n; i++) if (!bg[i]) { const x = i % w, y = (i - x) / w; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) { bg.fill(0); x0 = 0; y0 = 0; x1 = w - 1; y1 = h - 1; info += ' · 전부 배경이라 지우지 않음'; }
+  S.bg = bg; S.bbox = { x0, y0, x1: x1 + 1, y1: y1 + 1 };
+  $('st-bg').textContent = info;
+  // source view: background pixels dimmed
+  const vc = document.createElement('canvas'); vc.width = w; vc.height = h; const vctx = vc.getContext('2d');
+  const vi = vctx.createImageData(w, h); const vd = vi.data;
+  for (let i = 0; i < n; i++) { const o = i * 4; vd[o] = d[o]; vd[o + 1] = d[o + 1]; vd[o + 2] = d[o + 2]; vd[o + 3] = bg[i] ? Math.min(d[o + 3], 70) : d[o + 3]; }
+  vctx.putImageData(vi, 0, 0); S.srcViewCanvas = vc;
+}
+
+/* ======================= 2. grid ======================= */
+function edgeProfiles() {
+  const w = S.srcW, h = S.srcH, d = S.src.data, bg = S.bg, b = S.bbox, t2 = S.set.edgeThr * S.set.edgeThr;
+  const E = new Float32Array(w + 1), R = new Float32Array(h + 1);
+  const diff = (i, j) => { if (bg[i] && bg[j]) return 0; if (bg[i] !== bg[j]) return 1; const o = i * 4, p = j * 4; const dr = d[o] - d[p], dg = d[o + 1] - d[p + 1], db = d[o + 2] - d[p + 2]; return dr * dr + dg * dg + db * db > t2 ? 1 : 0; };
+  for (let y = b.y0; y < b.y1; y++) for (let x = b.x0 + 1; x < b.x1; x++) E[x] += diff(y * w + x, y * w + x - 1);
+  for (let y = b.y0 + 1; y < b.y1; y++) for (let x = b.x0; x < b.x1; x++) R[y] += diff(y * w + x, (y - 1) * w + x);
+  return { E, R };
+}
+function smoothProfile(P) { const Q = new Float32Array(P.length); for (let x = 0; x < P.length; x++) Q[x] = P[x] + 0.5 * ((x > 0 ? P[x - 1] : 0) + (x < P.length - 1 ? P[x + 1] : 0)); return Q; }
+function profileStats(P, a, b) {
+  let sum = 0, mx = 0, n = 0; for (let x = a + 1; x < b; x++) { sum += P[x]; if (P[x] > mx) mx = P[x]; n++; }
+  const mean = n ? sum / n : 0; let v = 0; for (let x = a + 1; x < b; x++) v += (P[x] - mean) ** 2;
+  return { mean, max: mx, sd: Math.sqrt(n ? v / n : 0) };
+}
+function bestOffset(P, a, b, s, stats) {
+  // score = how far the mean edge strength on the grid lines sits above chance, scaled by the number of lines (t statistic):
+  // a multiple of the true size hits the same edges with fewer lines, a fraction hits empty lines; both score lower
+  let best = -Infinity, bo = 0, bm = 0; const step = Math.max(0.25, s / 32);
+  for (let o = 0; o < s; o += step) {
+    let sum = 0, n = 0;
+    for (let x = a + o; x < b; x += s) { const xi = Math.round(x); if (xi > a && xi < b) { sum += P[xi]; n++; } }
+    if (n < 2) continue;
+    const m = sum / n; const sc = (m - stats.mean) / (stats.sd + 1e-6) * Math.sqrt(n);
+    if (sc > best) { best = sc; bo = o; bm = (m - stats.mean) / (stats.max - stats.mean + 1e-6); }
+  }
+  return { o: bo, sc: best === -Infinity ? 0 : best, m: Math.max(0, Math.min(1, bm)) };
+}
+function detectGrid() {
+  const { E, R } = edgeProfiles(); const b = S.bbox, st = S.set;
+  const Es = smoothProfile(E), Rs = smoothProfile(R);
+  const stX = profileStats(Es, b.x0, b.x1), stY = profileStats(Rs, b.y0, b.y1);
+  const smax = Math.max(st.sMin + 1, Math.min(st.sMax, Math.floor(Math.min(b.x1 - b.x0, b.y1 - b.y0) / 3)));
+  const res = [];
+  for (let s = st.sMin; s <= smax; s += s < 12 ? 0.25 : 0.5) {
+    const ox = bestOffset(Es, b.x0, b.x1, s, stX), oy = bestOffset(Rs, b.y0, b.y1, s, stY);
+    res.push({ s, ox: ox.o, oy: oy.o, sc: ox.sc + oy.sc, m: (ox.m + oy.m) / 2 });
+  }
+  if (!res.length) return null;
+  const at = s => { let bi = 0, bd = Infinity; for (let i = 0; i < res.length; i++) { const dd = Math.abs(res[i].s - s); if (dd < bd) { bd = dd; bi = i; } } return bd <= 0.5 ? res[bi] : null; };
+  let best = res[0]; for (const r of res) if (r.sc > best.sc) best = r;
+  // if a smaller divisor explains the edges nearly as well, prefer it (the larger size is then a multiple)
+  for (let guard = 0; guard < 4; guard++) {
+    let moved = false;
+    for (const dv of [2, 3]) { const c = at(best.s / dv); if (c && c.s >= st.sMin && c.sc >= best.sc * 0.95) { best = c; moved = true; break; } }
+    if (!moved) break;
+  }
+  return { s: best.s, ox: best.ox, oy: best.oy, match: best.m, E, R };
+}
+function snapLines(lines, P, lo, hi, s) {
+  const win = Math.max(1, Math.round(s * S.set.snapPct / 100)); const out = lines.slice();
+  for (let k = 1; k < lines.length - 1; k++) {
+    const ideal = lines[k]; let bx = ideal, bs = -1;
+    for (let x = Math.max(lo + 1, ideal - win); x <= Math.min(hi - 1, ideal + win); x++) { const sc = P[x] * (1 - 0.5 * Math.abs(x - ideal) / (win + 0.001)); if (sc > bs) { bs = sc; bx = x; } }
+    out[k] = bx;
+  }
+  const minGap = Math.max(1, Math.round(s * 0.5));
+  for (let k = 1; k < out.length; k++) if (out[k] < out[k - 1] + minGap) out[k] = out[k - 1] + minGap;
+  // keep strictly increasing and inside the image; drop lines pushed past the end
+  const res = [Math.max(lo, Math.min(hi, out[0]))];
+  for (let k = 1; k < out.length; k++) { const v = Math.min(hi, out[k]); if (v > res[res.length - 1]) res.push(v); }
+  if (res.length < 2) res.push(Math.min(hi, res[0] + 1));
+  return res;
+}
+function latticeLines(a, b, s, o, limit) {
+  // lines at a + o + k*s, extended so the cells cover [a, b)
+  const lines = []; let x = a + o; while (x - s > a - 1e-9) x -= s; if (x > a + 1e-9) x -= s;
+  for (; x < b - 1e-9; x += s) lines.push(Math.max(0, Math.round(x)));
+  lines.push(Math.min(limit, Math.round(x)));
+  const out = [lines[0]]; for (let k = 1; k < lines.length; k++) if (lines[k] > out[out.length - 1]) out.push(lines[k]);
+  if (out[out.length - 1] < b) out.push(Math.min(limit, b));
+  return out;
+}
+function computeGrid() {
+  const st = S.set, b = S.bbox, w = S.srcW, h = S.srcH;
+  let xs, ys, info = '';
+  if (st.gridMode === 'fixed') {
+    let W = Math.max(1, Math.round(st.outW)), H = Math.max(1, Math.round(st.outH));
+    const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+    if (st.lock) { H = Math.max(1, Math.round(W * bh / bw)); st.outH = H; const el = document.querySelector('[data-set="outH"]'); if (el) el.value = H; }
+    W = Math.min(W, bw); H = Math.min(H, bh);
+    xs = []; for (let i = 0; i <= W; i++) xs.push(b.x0 + Math.round(i * bw / W));
+    ys = []; for (let j = 0; j <= H; j++) ys.push(b.y0 + Math.round(j * bh / H));
+    info = `고정 ${W}×${H} · 칸 ${(bw / W).toFixed(2)}×${(bh / H).toFixed(2)}px`;
+    if (st.snap && bw / W >= 3 && bh / H >= 3) { const { E, R } = edgeProfiles(); xs = snapLines(xs, E, b.x0, b.x1, bw / W); ys = snapLines(ys, R, b.y0, b.y1, bh / H); }
+  } else {
+    let s, ox, oy, E = null, R = null;
+    if (st.gridMode === 'auto') {
+      const f = detectGrid();
+      if (!f) { s = 8; ox = 0; oy = 0; info = '찾지 못해 8px 사용'; }
+      else { s = f.s; ox = f.ox; oy = f.oy; E = f.E; R = f.R; S.found = { s, ox: Math.round(b.x0 + ox), oy: Math.round(b.y0 + oy) }; info = `찾음: 칸 ${s}px · 격자 시작 (${S.found.ox}, ${S.found.oy}) · 경계 일치 ${(f.match * 100).toFixed(0)}%`; }
+      xs = latticeLines(b.x0, b.x1, s, ox, w); ys = latticeLines(b.y0, b.y1, s, oy, h);
+    } else {
+      s = Math.max(1, st.cellSize);
+      const mod = (v, m) => ((v % m) + m) % m;
+      xs = latticeLines(b.x0, b.x1, s, mod(st.offX - b.x0, s), w); ys = latticeLines(b.y0, b.y1, s, mod(st.offY - b.y0, s), h);
+      info = `수동: 칸 ${s}px · 오프셋 (${st.offX}, ${st.offY})`;
+    }
+    if (st.snap && s >= 3) { if (!E) ({ E, R } = edgeProfiles()); xs = snapLines(xs, E, 0, w, s); ys = snapLines(ys, R, 0, h, s); }
+  }
+  S.xs = xs; S.ys = ys; S.W = xs.length - 1; S.H = ys.length - 1; S.gridInfo = info;
+  $('gridInfo').textContent = info; $('st-grid').textContent = `${S.W}×${S.H}`;
+}
+
+/* ======================= 3. cell colors ======================= */
+function cellBounds(i, j) {
+  const cl = (v, m) => Math.max(0, Math.min(m, v));
+  return { x0: cl(S.xs[i], S.srcW), x1: cl(S.xs[i + 1], S.srcW), y0: cl(S.ys[j], S.srcH), y1: cl(S.ys[j + 1], S.srcH) };
+}
+function cellPixels(i, j, inset) {
+  // returns {px: [idx...], opaque, total} using the inset region for sampling, full cell for alpha
+  const { x0, x1, y0, y1 } = cellBounds(i, j); const w = S.srcW, bg = S.bg;
+  let total = 0, opaque = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { total++; if (!bg[y * w + x]) opaque++; }
+  let ix0 = x0, ix1 = x1, iy0 = y0, iy1 = y1;
+  if (inset) { const mx = Math.floor((x1 - x0) * S.set.margin / 100), my = Math.floor((y1 - y0) * S.set.margin / 100); if (x1 - x0 - 2 * mx >= 2) { ix0 += mx; ix1 -= mx; } if (y1 - y0 - 2 * my >= 2) { iy0 += my; iy1 -= my; } }
+  const px = []; for (let y = iy0; y < iy1; y++) for (let x = ix0; x < ix1; x++) { const k = y * w + x; if (!bg[k]) px.push(k); }
+  if (!px.length) for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const k = y * w + x; if (!bg[k]) px.push(k); }
+  return { px, opaque, total, ix0, ix1, iy0, iy1 };
+}
+function cellHistogram(px) {
+  const d = S.src.data, q = Math.max(1, S.set.bucket), m = new Map();
+  for (const k of px) { const o = k * 4; const key = (Math.floor(d[o] / q) << 16) | (Math.floor(d[o + 1] / q) << 8) | Math.floor(d[o + 2] / q); let e = m.get(key); if (!e) { e = { n: 0, r: 0, g: 0, b: 0 }; m.set(key, e); } e.n++; e.r += d[o]; e.g += d[o + 1]; e.b += d[o + 2]; }
+  return [...m.values()].map(e => ({ n: e.n, rgb: [e.r / e.n, e.g / e.n, e.b / e.n] })).sort((a, b) => b.n - a.n);
+}
+function cellColor(i, j, info) {
+  const d = S.src.data, { px } = info, m = S.set.cellMethod; if (!px.length) return null;
+  if (m === 'mode') { return cellHistogram(px)[0].rgb; }
+  if (m === 'average') { let r = 0, g = 0, b = 0; for (const k of px) { const o = k * 4; r += d[o]; g += d[o + 1]; b += d[o + 2]; } return [r / px.length, g / px.length, b / px.length]; }
+  if (m === 'median') { const R = [], G = [], B = []; for (const k of px) { const o = k * 4; R.push(d[o]); G.push(d[o + 1]); B.push(d[o + 2]); } const md = a => { a.sort((x, y) => x - y); return a[a.length >> 1]; }; return [md(R), md(G), md(B)]; }
+  const { x0, x1, y0, y1 } = cellBounds(i, j); const cx = (x0 + x1 - 1) / 2, cy = (y0 + y1 - 1) / 2, w = S.srcW;
+  if (m === 'center') { const k = Math.round(cy) * w + Math.round(cx); if (!S.bg[k]) { const o = k * 4; return [d[o], d[o + 1], d[o + 2]]; } return cellHistogram(px)[0].rgb; }
+  // center-weighted
+  const sig = Math.max(1, Math.min(x1 - x0, y1 - y0) / 3); let r = 0, g = 0, b = 0, ws = 0;
+  for (const k of px) { const x = k % w, y = (k - x) / w; const wt = Math.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sig * sig)); const o = k * 4; r += d[o] * wt; g += d[o + 1] * wt; b += d[o + 2] * wt; ws += wt; }
+  return [r / ws, g / ws, b / ws];
+}
+function computeCells() {
+  const W = S.W, H = S.H, n = W * H; S.cellRGB = new Float32Array(n * 3); S.cellLab = new Float32Array(n * 3); S.cellA = new Uint8Array(n);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = j * W + i; const info = cellPixels(i, j, true);
+    if (!info.total || info.opaque * 100 < info.total * S.set.alphaThr) continue;
+    const c = cellColor(i, j, info); if (!c) continue;
+    S.cellA[k] = 1; S.cellRGB[k * 3] = c[0]; S.cellRGB[k * 3 + 1] = c[1]; S.cellRGB[k * 3 + 2] = c[2];
+    const L = rgb2lab(c[0], c[1], c[2]); S.cellLab[k * 3] = L[0]; S.cellLab[k * 3 + 1] = L[1]; S.cellLab[k * 3 + 2] = L[2];
+  }
+  const names = { mode: '가장 많은 색', median: '중앙값', center: '가운데 픽셀', average: '평균', cw: '중심 가중' };
+  $('st-cell').textContent = names[S.set.cellMethod];
+}
+const cellLabAt = k => [S.cellLab[k * 3], S.cellLab[k * 3 + 1], S.cellLab[k * 3 + 2]];
+const cellRGBAt = k => [S.cellRGB[k * 3], S.cellRGB[k * 3 + 1], S.cellRGB[k * 3 + 2]];
+
+/* ======================= 4. palette ======================= */
+function colorEntries(q) {
+  // unique quantized cell colors with counts and actual average rgb / lab
+  const m = new Map();
+  for (let k = 0; k < S.W * S.H; k++) { if (!S.cellA[k]) continue; const c = cellRGBAt(k); const key = (Math.floor(c[0] / q) << 16) | (Math.floor(c[1] / q) << 8) | Math.floor(c[2] / q); let e = m.get(key); if (!e) { e = { n: 0, r: 0, g: 0, b: 0 }; m.set(key, e); } e.n++; e.r += c[0]; e.g += c[1]; e.b += c[2]; }
+  return [...m.values()].map(e => { const rgb = [e.r / e.n, e.g / e.n, e.b / e.n]; return { n: e.n, rgb, lab: rgb2lab(rgb[0], rgb[1], rgb[2]) }; }).sort((a, b) => b.n - a.n);
+}
+function clusterRep(members) {
+  if (!members.length) return null;
+  if (S.set.palRep === 'original') { let best = members[0]; for (const e of members) if (e.n > best.n) best = e; return best.rgb.slice(); }
+  let r = 0, g = 0, b = 0, n = 0; for (const e of members) { r += e.rgb[0] * e.n; g += e.rgb[1] * e.n; b += e.rgb[2] * e.n; n += e.n; } return [r / n, g / n, b / n];
+}
+function kmeansPalette(entries, k) {
+  if (entries.length <= k) return entries.map(e => [e]);
+  const centers = [entries[0].lab.slice()];
+  const dmin = new Float64Array(entries.length).fill(Infinity);
+  while (centers.length < k) {           // farthest-point init, weighted by count (deterministic)
+    let bi = 0, bd = -1; const c = centers[centers.length - 1];
+    for (let i = 0; i < entries.length; i++) { const dd = okDist(entries[i].lab, c); if (dd < dmin[i]) dmin[i] = dd; const sc = dmin[i] * Math.sqrt(entries[i].n); if (sc > bd) { bd = sc; bi = i; } }
+    if (bd <= 0) break; centers.push(entries[bi].lab.slice());
+  }
+  let assign = new Int32Array(entries.length);
+  for (let it = 0; it < 30; it++) {
+    let changed = false;
+    for (let i = 0; i < entries.length; i++) { let bi = 0, bd = Infinity; for (let c = 0; c < centers.length; c++) { const dd = okDist(entries[i].lab, centers[c]); if (dd < bd) { bd = dd; bi = c; } } if (assign[i] !== bi) { assign[i] = bi; changed = true; } }
+    const sum = centers.map(() => [0, 0, 0, 0]);
+    for (let i = 0; i < entries.length; i++) { const s = sum[assign[i]], e = entries[i]; s[0] += e.lab[0] * e.n; s[1] += e.lab[1] * e.n; s[2] += e.lab[2] * e.n; s[3] += e.n; }
+    for (let c = 0; c < centers.length; c++) if (sum[c][3] > 0) centers[c] = [sum[c][0] / sum[c][3], sum[c][1] / sum[c][3], sum[c][2] / sum[c][3]];
+    if (!changed) break;
+  }
+  const groups = centers.map(() => []); for (let i = 0; i < entries.length; i++) groups[assign[i]].push(entries[i]);
+  return groups.filter(g => g.length);
+}
+function oklchPalette(entries) {
+  const { rL, rC, rH } = S.set; const groups = [], cents = [];
+  for (const e of entries) {
+    const C = chroma(e.lab), Hh = hueDeg(e.lab); let bi = -1, bd = Infinity;
+    for (let c = 0; c < cents.length; c++) { const cl = cents[c]; const Cc = chroma(cl); if (Math.abs(e.lab[0] - cl[0]) > rL || Math.abs(C - Cc) > rC) continue; const grey = C < 0.03 || Cc < 0.03; if (!grey && hueDiff(Hh, hueDeg(cl)) > rH) continue; const dd = okDist(e.lab, cl); if (dd < bd) { bd = dd; bi = c; } }
+    if (bi < 0 && cents.length < 64) { cents.push(e.lab); groups.push([e]); continue; }
+    if (bi < 0) { for (let c = 0; c < cents.length; c++) { const dd = okDist(e.lab, cents[c]); if (dd < bd) { bd = dd; bi = c; } } }
+    groups[bi].push(e);
+  }
+  return groups;
+}
+function medianCutPalette(entries, k) {
+  let buckets = [entries];
+  const range = b => { const mn = [1, 1, 1], mx = [-1, -1, -1]; for (const e of b) for (let c = 0; c < 3; c++) { if (e.lab[c] < mn[c]) mn[c] = e.lab[c]; if (e.lab[c] > mx[c]) mx[c] = e.lab[c]; } let ch = 0, best = -1; for (let c = 0; c < 3; c++) { const r = mx[c] - mn[c]; if (r > best) { best = r; ch = c; } } return { ch, best }; };
+  while (buckets.length < k) {
+    let bi = -1, bs = 0; buckets.forEach((b, i) => { if (b.length < 2) return; const r = range(b); let n = 0; for (const e of b) n += e.n; const sc = r.best * Math.sqrt(n); if (sc > bs) { bs = sc; bi = i; } });
+    if (bi < 0) break; const b = buckets[bi], { ch } = range(b); b.sort((x, y) => x.lab[ch] - y.lab[ch]);
+    let total = 0; for (const e of b) total += e.n; let acc = 0, cut = 1; for (let i = 0; i < b.length - 1; i++) { acc += b[i].n; if (acc >= total / 2) { cut = i + 1; break; } }
+    buckets.splice(bi, 1, b.slice(0, cut), b.slice(cut));
+  }
+  return buckets;
+}
+function computePalette() {
+  const st = S.set; let groups;
+  if (st.palMode === 'keep') { const ents = colorEntries(8).slice(0, 256); groups = ents.map(e => [e]); }
+  else { const ents = colorEntries(4); if (!ents.length) { S.palette = []; S.palLab = []; return; }
+    groups = st.palMode === 'kmeans' ? kmeansPalette(ents, st.nColors) : st.palMode === 'oklch' ? oklchPalette(ents) : medianCutPalette(ents, st.nColors); }
+  let pal = groups.map(g => { let n = 0; for (const e of g) n += e.n; return { rgb: clusterRep(g), n }; }).filter(p => p.rgb);
+  // merge near-identical results
+  const out = []; for (const p of pal) { const L = rgb2lab(p.rgb[0], p.rgb[1], p.rgb[2]); const dup = out.find(o => okDist(o.lab, L) < 0.01); if (dup) dup.n += p.n; else out.push({ rgb: p.rgb, lab: L, n: p.n }); }
+  if (st.darkUnify) { const dark = out.filter(o => o.lab[0] <= st.darkL); if (dark.length > 1) { let keep = dark[0]; for (const d of dark) if (d.n > keep.n) keep = d; for (const d of dark) if (d !== keep) out.splice(out.indexOf(d), 1); } }
+  out.sort((a, b) => b.n - a.n);
+  S.palette = out.map(o => o.rgb.map(Math.round)); S.palLab = S.palette.map(c => rgb2lab(c[0], c[1], c[2]));
+  const names = { kmeans: 'k-평균', oklch: 'OKLCH', mediancut: '중앙 분할', keep: '원래 색' };
+  $('st-pal').textContent = `${names[st.palMode]} ${S.palette.length}색`;
+}
+function nearestPalette(lab, exclude) {
+  let bi = -1, bd = Infinity;
+  for (let p = 0; p < S.palLab.length; p++) { if (exclude && exclude.has(p)) continue; const dd = labDist(lab, S.palLab[p]); if (dd < bd) { bd = dd; bi = p; } }
+  return { idx: bi, d: bd };
+}
+function choosePalette(lab) {
+  // returns {idx, why}: 0 = nearest, 1 = shade family
+  const near = nearestPalette(lab); if (near.idx < 0) return { idx: -1, why: 0 };
+  if (!S.set.shade) return { idx: near.idx, why: 0 };
+  const C = chroma(lab), Hh = hueDeg(lab); let fi = -1, fd = Infinity;
+  for (let p = 0; p < S.palLab.length; p++) {
+    const pl = S.palLab[p], Cp = chroma(pl);
+    const family = (C < 0.04 && Cp < 0.04) || (C >= 0.04 && Cp >= 0.04 && hueDiff(Hh, hueDeg(pl)) <= 20 && Math.abs(C - Cp) <= 0.08);
+    if (!family) continue; const dL = Math.abs(lab[0] - pl[0]); if (dL < fd) { fd = dL; fi = p; }
+  }
+  if (fi >= 0 && fi !== near.idx && labDist(lab, S.palLab[fi]) < near.d * 2.2) return { idx: fi, why: 1 };
+  return { idx: near.idx, why: 0 };
+}
+function assignCells() {
+  const n = S.W * S.H; S.base = new Int16Array(n).fill(-1); S.baseWhy = new Uint8Array(n);
+  for (let k = 0; k < n; k++) { if (!S.cellA[k]) continue; const r = choosePalette(cellLabAt(k)); S.base[k] = r.idx; S.baseWhy[k] = r.why; }
+}
+
+/* ======================= 5. cleanup ======================= */
+function cleanup() {
+  const W = S.W, H = S.H, st = S.set; S.clean = S.base.slice(); S.cleanWhy = new Uint8Array(W * H);
+  const nb = (i, j) => { const out = []; if (i > 0) out.push(S.base[j * W + i - 1]); if (i < W - 1) out.push(S.base[j * W + i + 1]); if (j > 0) out.push(S.base[(j - 1) * W + i]); if (j < H - 1) out.push(S.base[(j + 1) * W + i]); return out; };
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = j * W + i, me = S.base[k], ns = nb(i, j);
+    if (st.isolated && me >= 0) {
+      const op = ns.filter(v => v >= 0); if (op.length >= 3 && op.every(v => v === op[0]) && op[0] !== me && okDist(S.palLab[me], S.palLab[op[0]]) <= st.isoContrast) { S.clean[k] = op[0]; S.cleanWhy[k] = 1; }
+    }
+    if (st.holes && me < 0 && ns.length === 4 && ns.every(v => v >= 0)) {
+      const cnt = new Map(); let best = ns[0], bc = 0; for (const v of ns) { const c = (cnt.get(v) || 0) + 1; cnt.set(v, c); if (c > bc) { bc = c; best = v; } }
+      S.clean[k] = best; S.cleanWhy[k] = 2;
+    }
+  }
+  $('st-clean').textContent = [st.isolated ? '외톨이' : '', st.holes ? '구멍' : ''].filter(Boolean).join('·') || '끔';
+}
+
+/* ======================= 6. removed colors / fixed colors / overrides ======================= */
+const P = () => S.palette.length;
+const colorOf = idx => idx < 0 ? null : idx < P() ? S.palette[idx] : (S.fixed[idx - P()] ? S.fixed[idx - P()].rgb : null);
+const labOf = idx => idx < P() ? S.palLab[idx] : S.fixed[idx - P()].lab;
+function finalFor(k) {
+  // returns {idx, why: bitmask 1 = removed-remap, 2 = fixed}
+  let idx = S.clean[k], why = 0; if (idx < 0) return { idx: -1, why };
+  const lab = S.cellA[k] ? cellLabAt(k) : S.palLab[idx];
+  if (S.removed.has(idx)) { const r = nearestPalette(lab, S.removed); if (r.idx >= 0) { idx = r.idx; why |= 1; } }
+  for (let f = 0; f < S.fixed.length; f++) { if (labDist(lab, S.fixed[f].lab) < labDist(lab, labOf(idx))) { idx = P() + f; why |= 2; } }
+  return { idx, why };
+}
+function computeFinal() {
+  const n = S.W * S.H; S.finalIdx = new Int16Array(n); S.finalWhy = new Uint8Array(n);
+  for (let k = 0; k < n; k++) { const r = finalFor(k); S.finalIdx[k] = r.idx; S.finalWhy[k] = r.why; }
+  buildResult();
+}
+function cellFinalRGB(k) {
+  const ov = S.overrides.get(k); if (ov !== undefined) return ov;
+  return colorOf(S.finalIdx[k]);
+}
+/* the result is a plain W×H image: every result pixel is the same size, only the source side shows the uneven cell boundaries */
+function buildResult() {
+  const W = S.W, H = S.H;
+  if (!S.resCanvas || S.resCanvas.width !== W || S.resCanvas.height !== H) { S.resCanvas = document.createElement('canvas'); S.resCanvas.width = W; S.resCanvas.height = H; }
+  const img = S.resCanvas.getContext('2d').createImageData(W, H);
+  for (let k = 0; k < W * H; k++) { const c = cellFinalRGB(k); const o = k * 4; if (c) { img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255; } }
+  S.resImg = img; S.resCanvas.getContext('2d').putImageData(img, 0, 0);
+  buildMask();
+}
+function paintCellToMap(i, j) {
+  const k = j * S.W + i, c = cellFinalRGB(k), o = k * 4;
+  if (c) { S.resImg.data[o] = c[0]; S.resImg.data[o + 1] = c[1]; S.resImg.data[o + 2] = c[2]; S.resImg.data[o + 3] = 255; }
+  else S.resImg.data[o] = S.resImg.data[o + 1] = S.resImg.data[o + 2] = S.resImg.data[o + 3] = 0;
+  S.resCanvas.getContext('2d').putImageData(S.resImg, 0, 0);
+}
+function buildMask() {
+  if (S.focusIdx < 0 || !S.finalIdx) { S.maskCanvas = null; return; }
+  const W = S.W, H = S.H, mc = document.createElement('canvas'); mc.width = W; mc.height = H; const img = mc.getContext('2d').createImageData(W, H);
+  for (let k = 0; k < W * H; k++) if (!(S.finalIdx[k] === S.focusIdx && S.overrides.get(k) === undefined)) img.data[k * 4 + 3] = 180;
+  mc.getContext('2d').putImageData(img, 0, 0); S.maskCanvas = mc;
+}
+/* where the uniform result sits in source coordinates: same bounding box as the gridded area of the source */
+function resGeom() { const W = S.W, H = S.H; const X0 = S.xs[0], Y0 = S.ys[0]; return { X0, Y0, cw: (S.xs[W] - X0) / W, ch: (S.ys[H] - Y0) / H }; }
+function cellRectView(cell, kind) {
+  if (kind === 'src') return cellBounds(cell.i, cell.j);
+  const g = resGeom(); return { x0: g.X0 + cell.i * g.cw, x1: g.X0 + (cell.i + 1) * g.cw, y0: g.Y0 + cell.j * g.ch, y1: g.Y0 + (cell.j + 1) * g.ch };
+}
+
+/* ======================= pipeline ======================= */
+function recompute() {
+  if (!S.src) return;
+  const t0 = performance.now(); $('status').textContent = '계산 중…';
+  const prevW = S.W, prevH = S.H;
+  computeBackground(); computeGrid(); computeCells(); computePalette(); assignCells(); cleanup();
+  if (S.W !== prevW || S.H !== prevH) { S.overrides.clear(); S.undo.length = 0; S.sel = null; }
+  for (const key of [...S.overrides.keys()]) if (key >= S.W * S.H) S.overrides.delete(key);
+  if (S.removed.size >= P()) S.removed.clear();
+  for (const r of [...S.removed]) if (r >= P()) S.removed.delete(r);
+  S.focusIdx = -1;
+  computeFinal();
+  $('status').textContent = `${S.gridInfo} · ${(performance.now() - t0).toFixed(0)}ms`;
+  if (fitViewLater) { fitViewLater = false; fitView(); }
+  afterChange();
+}
+function afterChange() {
+  const used = new Set(); let usedCount = 0;
+  if (S.finalIdx) for (let k = 0; k < S.finalIdx.length; k++) { const c = cellFinalRGB(k); if (c) { used.add(hex(c)); } if (S.finalIdx[k] >= 0) usedCount++; }
+  $('resInfo').textContent = S.src ? `${S.W}×${S.H}px · ${used.size}색` : '—';
+  $('stats').textContent = S.src ? `사용된 색 ${used.size}개 · 뺀 색 ${S.removed.size}개 · 고정 색 ${S.fixed.length}개 · 직접 지정 ${S.overrides.size}칸` : '';
+  $('undo').disabled = !S.undo.length;
+  $('removedInfo').textContent = S.removed.size ? `색 빼기 ${S.removed.size}개 적용 중` : '';
+  $('restoreAll').hidden = !S.removed.size; $('unfixAll').hidden = !S.fixed.length;
+  renderPalette(); renderInspector(); draw();
+}
+
+/* ======================= palette strip ======================= */
+let focusTimer = null;
+function flashFocus(idx) {
+  S.focusIdx = idx; buildMask(); renderPalette(); draw();
+  clearTimeout(focusTimer); focusTimer = setTimeout(() => { S.focusIdx = -1; buildMask(); renderPalette(); draw(); }, 1500);
+}
+function renderPalette() {
+  const box = $('swatches'); box.innerHTML = '';
+  const usage = new Map(); if (S.finalIdx) for (let k = 0; k < S.finalIdx.length; k++) { const v = S.finalIdx[k]; if (v >= 0 && S.overrides.get(k) === undefined) usage.set(v, (usage.get(v) || 0) + 1); }
+  const total = P() + S.fixed.length;
+  for (let k = 0; k < total; k++) {
+    const c = colorOf(k); if (!c) continue; const isFixed = k >= P();
+    const b = document.createElement('button'); b.className = 'sw'; b.style.background = hex(c);
+    const u = usage.get(k) || 0;
+    b.title = `${hex(c)} · ${u}칸` + (isFixed ? ' · 고정 색 (우클릭: 해제)' : S.removed.has(k) ? ' · 뺀 색 (우클릭: 되살리기)' : S.tool === 'paint' ? ' · 클릭: 붓 색' : ' · 좌클릭: 쓰인 곳 · 우클릭: 이 색 빼기');
+    if (isFixed) b.classList.add('fixed'); if (S.removed.has(k)) b.classList.add('removed'); if (!u) b.classList.add('unused');
+    if (S.focusIdx === k) b.classList.add('focus');
+    if (S.tool === 'paint' && S.brush && hex(S.brush) === hex(c)) b.classList.add('brush');
+    b.addEventListener('click', () => { if (S.tool === 'paint') { S.brush = c.slice(); renderPalette(); toast(`붓 색 ${hex(c)}`); } else flashFocus(k); });
+    b.addEventListener('contextmenu', e => { e.preventDefault(); toggleRemove(k); });
+    box.appendChild(b);
+  }
+  const add = document.createElement('button'); add.className = 'sw-add' + (S.picking ? ' on' : ''); add.textContent = '+'; add.title = '원본에서 색 추가: 누른 뒤 원본 칸을 클릭하면 그 칸 색이 고정 색으로 들어갑니다 (Shift+클릭이면 계속, Esc로 그만)';
+  add.addEventListener('click', () => setPicking(!S.picking));
+  box.appendChild(add);
+  $('palCount').textContent = S.palette.length ? `${P()}색${S.fixed.length ? ` + 고정 ${S.fixed.length}` : ''}` : '';
+  $('legend').innerHTML = S.picking
+    ? '<b>원본에서 색 고르는 중</b> · 원본 화면의 칸을 <kbd>클릭</kbd>하면 그 칸 색이 고정 색이 됩니다 · <kbd>Shift+클릭</kbd> 계속 · <kbd>Esc</kbd>·<kbd>우클릭</kbd> 그만'
+    : S.tool === 'select'
+      ? '색 견본·결과 픽셀 <kbd>좌클릭</kbd> 쓰인 곳 보기 · <kbd>우클릭</kbd> 이 색 빼기/되살리기 (다시 계산하지 않고 그 자리만 가장 가까운 남은 색으로) · <kbd>+</kbd> 원본에서 고정 색 추가 · 휠 확대 · 드래그·휠버튼·두 손가락 이동'
+      : S.tool === 'paint'
+        ? '견본 <kbd>클릭</kbd> 붓 색 · 결과 칸 <kbd>클릭</kbd>·<kbd>드래그</kbd> 칠하기 · <kbd>우클릭</kbd>·<kbd>길게 누르기</kbd> 색 추출 · <kbd>휠버튼</kbd>·<kbd>두 손가락</kbd> 이동'
+        : '결과 칸 <kbd>클릭</kbd>·<kbd>드래그</kbd> 투명으로 · <kbd>우클릭</kbd>·<kbd>길게 누르기</kbd> 색 추출 · <kbd>휠버튼</kbd>·<kbd>두 손가락</kbd> 이동';
+}
+function toggleRemove(k) {
+  if (k >= P()) { S.fixed.splice(k - P(), 1); computeFinal(); afterChange(); toast('고정 색을 해제했습니다'); return; }
+  if (S.removed.has(k)) S.removed.delete(k);
+  else { if (S.removed.size >= P() - 1) { toast('마지막 남은 색은 뺄 수 없습니다'); return; } S.removed.add(k); }
+  computeFinal(); afterChange();
+}
+$('restoreAll').addEventListener('click', () => { S.removed.clear(); computeFinal(); afterChange(); });
+$('unfixAll').addEventListener('click', () => { S.fixed = []; computeFinal(); afterChange(); });
+function setPicking(on) {
+  S.picking = on; $('wrapS').classList.toggle('picking', on); renderPalette();
+  if (on) toast('원본 화면에서 칸을 클릭하세요');
+}
+function addFixedFromCell(c, keep) {
+  const k = c.j * S.W + c.i; if (!S.cellA[k]) { toast('투명 칸입니다'); return; }
+  const rgb = cellRGBAt(k).map(Math.round); const lab = rgb2lab(rgb[0], rgb[1], rgb[2]);
+  if (S.fixed.some(f => okDist(f.lab, lab) < 0.01)) { toast('이미 고정 색에 있습니다'); }
+  else { S.fixed.push({ rgb, lab }); computeFinal(); toast(`고정 색 추가 ${hex(rgb)}`); }
+  if (!keep) setPicking(false); S.sel = c; afterChange();
+}
+
+/* ======================= inspector ======================= */
+function renderInspector() {
+  const box = $('inspector');
+  if (!S.sel || !S.src || !S.finalIdx) { box.innerHTML = '<div class="insp-empty">결과 픽셀이나 원본 칸을 클릭하면 그 칸의 색이 단계별로 어떻게 정해졌는지 보여줍니다.</div>'; $('clearOverride').hidden = true; return; }
+  const { i, j } = S.sel, k = j * S.W + i, b = cellBounds(i, j); $('clearOverride').hidden = !S.overrides.has(k);
+  const stages = [];
+  const info = cellPixels(i, j, true);
+  if (!S.cellA[k]) stages.push({ nm: `투명 (불투명 ${info.total ? Math.round(info.opaque * 100 / info.total) : 0}% < ${S.set.alphaThr}%)`, c: null });
+  else {
+    const names = { mode: '가장 많은 색', median: '중앙값', center: '가운데 픽셀', average: '평균', cw: '중심 가중 평균' };
+    stages.push({ nm: `칸 색 (${names[S.set.cellMethod]})`, c: cellRGBAt(k) });
+    const bi = S.base[k]; if (bi >= 0) stages.push({ nm: S.baseWhy[k] ? '팔레트 (명암 계열 우선)' : '팔레트 (가장 가까운 색)', c: S.palette[bi] });
+    if (S.cleanWhy[k]) stages.push({ nm: S.cleanWhy[k] === 1 ? '정리 (외톨이 픽셀)' : '정리 (구멍 메우기)', c: colorOf(S.clean[k]) });
+  }
+  if (S.cleanWhy[k] === 2 && !S.cellA[k]) stages.push({ nm: '정리 (1px 구멍 메우기)', c: colorOf(S.clean[k]) });
+  const fw = S.finalWhy[k]; if (fw & 1) stages.push({ nm: '색 빼기 → 가장 가까운 남은 색', c: colorOf(S.finalIdx[k] < P() ? S.finalIdx[k] : S.clean[k]) });
+  if (fw & 2) stages.push({ nm: '고정 색', c: colorOf(S.finalIdx[k]) });
+  const ov = S.overrides.get(k); if (ov !== undefined) stages.push({ nm: '직접 지정', c: ov });
+  let html = `<div class="insp-meta"><span>칸 (${i}, ${j})</span><span>원본 x${b.x0}–${b.x1 - 1} y${b.y0}–${b.y1 - 1} (${b.x1 - b.x0}×${b.y1 - b.y0}px)</span></div>`;
+  stages.forEach((s, n) => { html += `<div class="stage${n === stages.length - 1 ? ' last' : ''}"><i style="background:${s.c ? hex(s.c) : 'transparent'}"></i><span class="nm">${s.nm}</span><span class="hx">${s.c ? hex(s.c) : '투명'}</span></div>`; });
+  if (S.cellA[k] && S.palLab.length) {
+    const lab = cellLabAt(k); const C = chroma(lab), Hh = hueDeg(lab);
+    const near = S.palLab.map((pl, p) => ({ p, d: labDist(lab, pl) })).sort((a, b2) => a.d - b2.d).slice(0, 3);
+    html += '<div class="near"><span>가까운 팔레트 색:</span>' + near.map(n => { const pl = S.palLab[n.p]; return `<span class="c${n.p === S.base[k] ? ' pick' : ''}"><i style="background:${hex(S.palette[n.p])}"></i>${n.d.toFixed(3)} <span class="hint">(L${(pl[0] - lab[0]) >= 0 ? '+' : ''}${(pl[0] - lab[0]).toFixed(2)} C${(chroma(pl) - C) >= 0 ? '+' : ''}${(chroma(pl) - C).toFixed(2)} H${hueDiff(Hh, hueDeg(pl)).toFixed(0)}°)</span></span>`; }).join('') + '</div>';
+    const hist = cellHistogram(info.px).slice(0, 6); const tot = info.px.length;
+    html += '<div class="hist" title="칸 안의 색 분포 (색 묶기 간격 기준)">' + hist.map(h => `<i style="width:${(h.n / tot * 100).toFixed(1)}%;background:${hex(h.rgb)}" title="${hex(h.rgb)} ${(h.n / tot * 100).toFixed(0)}%"></i>`).join('') + '</div>';
+  }
+  html += '<div class="pick-row"><span class="lbl">직접 지정</span>';
+  for (let p = 0; p < P() + S.fixed.length; p++) { const c = colorOf(p); if (c && !S.removed.has(p)) html += `<button class="sw" data-set-color="${hex(c)}" style="background:${hex(c)}" title="${hex(c)}"></button>`; }
+  html += '<button class="sw" data-set-color="" title="투명" style="background:repeating-linear-gradient(45deg,#999 0 3px,#ddd 3px 6px)"></button></div>';
+  box.innerHTML = html;
+  box.querySelectorAll('[data-set-color]').forEach(el => el.addEventListener('click', () => {
+    const v = el.dataset.setColor ? [parseInt(el.dataset.setColor.slice(1, 3), 16), parseInt(el.dataset.setColor.slice(3, 5), 16), parseInt(el.dataset.setColor.slice(5, 7), 16)] : null;
+    S.undo.push([{ key: k, prev: S.overrides.get(k) }]); S.overrides.set(k, v); paintCellToMap(i, j); afterChange();
+  }));
+}
+$('clearOverride').addEventListener('click', () => {
+  if (!S.sel) return; const k = S.sel.j * S.W + S.sel.i; if (!S.overrides.has(k)) return;
+  S.undo.push([{ key: k, prev: S.overrides.get(k) }]); S.overrides.delete(k); paintCellToMap(S.sel.i, S.sel.j); afterChange();
+});
+function undo() {
+  const stroke = S.undo.pop(); if (!stroke) return;
+  for (let t = stroke.length - 1; t >= 0; t--) { const { key, prev } = stroke[t]; if (prev === undefined) S.overrides.delete(key); else S.overrides.set(key, prev); paintCellToMap(key % S.W, Math.floor(key / S.W)); }
+  afterChange();
+}
+$('undo').addEventListener('click', undo);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (S.picking) setPicking(false); if (!$('exportOverlay').hidden) $('exportOverlay').hidden = true; return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !/input|select|textarea/i.test(e.target.tagName)) { e.preventDefault(); undo(); }
+});
+function setTool(t) {
+  S.tool = t;
+  document.querySelectorAll('.seg [data-tool]').forEach(x => x.classList.toggle('on', x.dataset.tool === t));
+  wrapR.dataset.tool = t; renderPalette(); draw();
+  if (t === 'paint' && !S.brush) toast('색 견본을 클릭해 붓 색을 고르거나, 결과 칸을 우클릭(길게 누르기)해 추출하세요');
+}
+document.querySelectorAll('.seg [data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+/* ======================= view / drawing ======================= */
+const cvR = $('cvR'), cvS = $('cvS'), wrapR = $('wrapR'), wrapS = $('wrapS');
+function sizeCanvases() {
+  for (const [c, w] of [[cvR, wrapR], [cvS, wrapS]]) { const r = w.getBoundingClientRect(); c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr)); }
+  if (fitViewLater && S.src) { fitViewLater = false; fitView(); return; }
+  draw();
+}
+new ResizeObserver(sizeCanvases).observe(wrapR); new ResizeObserver(sizeCanvases).observe(wrapS);
+function fitView() {
+  const r = wrapR.getBoundingClientRect(); if (!S.src) return;
+  if (r.width < 20 || r.height < 20) { fitViewLater = true; return; }   // pane not laid out yet: fit on the next resize
+  const sc = Math.min(r.width / S.srcW, r.height / S.srcH) * 0.94;
+  S.view = { scale: sc, tx: (r.width - S.srcW * sc) / 2, ty: (r.height - S.srcH * sc) / 2 }; draw();
+}
+function draw() {
+  drawPane(cvR, 'res'); drawPane(cvS, 'src');
+  $('zoomInfo').textContent = S.src && S.W ? `×${(S.view.scale * (S.xs[S.W] - S.xs[0]) / S.W).toFixed(1)}` : '';
+}
+function drawPane(c, kind) {
+  const ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
+  if (!S.src) return;
+  const v = S.view; ctx.imageSmoothingEnabled = false;
+  ctx.setTransform(dpr * v.scale, 0, 0, dpr * v.scale, dpr * v.tx, dpr * v.ty);
+  if (kind === 'src') { ctx.imageSmoothingEnabled = v.scale < 1; ctx.drawImage(S.srcViewCanvas || S.srcCanvas, 0, 0); }
+  else if (S.resCanvas && S.xs) { const g = resGeom(); ctx.drawImage(S.resCanvas, g.X0, g.Y0, S.W * g.cw, S.H * g.ch); if (S.maskCanvas) ctx.drawImage(S.maskCanvas, g.X0, g.Y0, S.W * g.cw, S.H * g.ch); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (!S.xs) return;
+  const cs = getComputedStyle(document.documentElement);
+  const g = resGeom(); const cw = v.scale * g.cw, ch = v.scale * g.ch;
+  if (S.showGrid && Math.min(cw, ch) >= 4) {
+    const X0 = v.tx + S.xs[0] * v.scale, Y0 = v.ty + S.ys[0] * v.scale, X1 = v.tx + S.xs[S.W] * v.scale, Y1 = v.ty + S.ys[S.H] * v.scale;
+    ctx.lineWidth = 1;
+    // source: the real (uneven) cell boundaries; result: one equal cell per pixel
+    const xsL = kind === 'src' ? S.xs : Array.from({ length: S.W + 1 }, (_, i) => g.X0 + i * g.cw);
+    const ysL = kind === 'src' ? S.ys : Array.from({ length: S.H + 1 }, (_, j) => g.Y0 + j * g.ch);
+    for (const [col, off] of kind === 'src' ? [['rgba(0,0,0,0.45)', 1], ['rgba(255,255,255,0.6)', 0]] : [['rgba(0,0,0,0.35)', 0]]) {
+      ctx.strokeStyle = col; ctx.beginPath();
+      for (const x of xsL) { const sx = Math.round(v.tx + x * v.scale) + 0.5 + off; ctx.moveTo(sx, Y0); ctx.lineTo(sx, Y1); }
+      for (const y of ysL) { const sy = Math.round(v.ty + y * v.scale) + 0.5 + off; ctx.moveTo(X0, sy); ctx.lineTo(X1, sy); }
+      ctx.stroke();
+    }
+  }
+  const box = (cell, color, lw) => { const b = cellRectView(cell, kind); ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.strokeRect(v.tx + b.x0 * v.scale, v.ty + b.y0 * v.scale, (b.x1 - b.x0) * v.scale, (b.y1 - b.y0) * v.scale); };
+  if (S.hover) box(S.hover, 'rgba(255,255,255,0.85)', 1);
+  if (S.sel) { box(S.sel, '#000', 4); box(S.sel, cs.getPropertyValue('--accent').trim() || '#43d6c8', 2); }
+}
+function bsearch(arr, v) { let lo = 0, hi = arr.length - 2; if (v < arr[0] || v >= arr[arr.length - 1]) return -1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (arr[m] <= v) lo = m; else hi = m - 1; } return lo; }
+function toCellXY(wrap, cx, cy) {
+  if (!S.xs) return null;
+  const r = wrap.getBoundingClientRect(); const x = (cx - r.left - S.view.tx) / S.view.scale, y = (cy - r.top - S.view.ty) / S.view.scale;
+  if (wrap === wrapR) { const g = resGeom(); const i = Math.floor((x - g.X0) / g.cw), j = Math.floor((y - g.Y0) / g.ch); if (i < 0 || j < 0 || i >= S.W || j >= S.H) return null; return { i, j }; }
+  const i = bsearch(S.xs, x), j = bsearch(S.ys, y); if (i < 0 || j < 0) return null; return { i, j };
+}
+function toCell(wrap, ev) { return toCellXY(wrap, ev.clientX, ev.clientY); }
+function eyedrop(c) {
+  if (!c || !S.resImg) return;
+  const rgb = cellFinalRGB(c.j * S.W + c.i);
+  if (!rgb) { toast('투명 칸이라 가져올 색이 없습니다'); return; }
+  S.brush = rgb.slice(); S.sel = c;
+  if (S.tool !== 'paint') setTool('paint'); else { renderPalette(); draw(); }
+  renderInspector(); toast(`붓 색 ${hex(rgb)}`);
+}
+function zoomAt(mx, my, factor) {
+  const ns = Math.min(200, Math.max(0.02, S.view.scale * factor)); const k = ns / S.view.scale;
+  S.view.tx = mx - (mx - S.view.tx) * k; S.view.ty = my - (my - S.view.ty) * k; S.view.scale = ns; draw();
+}
+function selectCell(c, fromResult) {
+  S.sel = c; renderInspector(); draw();
+  if (c && fromResult && S.tool === 'select') { const k = c.j * S.W + c.i; if (S.overrides.get(k) === undefined && S.finalIdx[k] >= 0) flashFocus(S.finalIdx[k]); }
+}
+for (const wrap of [wrapR, wrapS]) {
+  const isResult = wrap === wrapR;
+  const pointers = new Map();
+  let drag = null, stroke = null, pinch = null, pending = null, lpTimer = null, lastType = 'mouse';
+  const canPaint = () => isResult && S.tool !== 'select' && S.src && !S.picking;
+  const local = (cx, cy) => { const r = wrap.getBoundingClientRect(); return { x: cx - r.left, y: cy - r.top }; };
+  wrap.addEventListener('wheel', e => { if (!S.src) return; e.preventDefault(); const p = local(e.clientX, e.clientY); zoomAt(p.x, p.y, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+  wrap.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+  wrap.addEventListener('dblclick', e => { if (!S.src || !e.isTrusted) return; fitView(); });
+  const paintAt = (cx, cy) => {
+    const c = toCellXY(wrap, cx, cy); if (!c) return;
+    const key = c.j * S.W + c.i; const v = S.tool === 'erase' ? null : S.brush.slice();
+    const cur = S.overrides.get(key); if (cur !== undefined && ((cur === null && v === null) || (cur && v && hex(cur) === hex(v)))) return;
+    stroke.push({ key, prev: cur }); S.overrides.set(key, v); paintCellToMap(c.i, c.j); S.sel = c; draw();
+  };
+  const beginStroke = () => { if (S.tool === 'paint' && !S.brush) { toast('붓 색을 먼저 고르세요 (견본 클릭, 또는 결과 칸을 우클릭·길게 누르기)'); return false; } stroke = []; return true; };
+  const endStroke = () => { if (stroke && stroke.length) S.undo.push(stroke); stroke = null; afterChange(); };
+  const revertStroke = () => { if (!stroke) return; for (let t = stroke.length - 1; t >= 0; t--) { const { key, prev } = stroke[t]; if (prev === undefined) S.overrides.delete(key); else S.overrides.set(key, prev); paintCellToMap(key % S.W, Math.floor(key / S.W)); } stroke = null; draw(); };
+  const startDrag = (cx, cy, moved) => { drag = { x: cx, y: cy, tx: S.view.tx, ty: S.view.ty, moved: !!moved }; if (moved) wrap.classList.add('dragging'); };
+  const clearPending = () => { clearTimeout(lpTimer); lpTimer = null; pending = null; };
+  const tapSelect = (cx, cy, shift) => {
+    const c = toCellXY(wrap, cx, cy);
+    if (S.picking) { if (!isResult && c) addFixedFromCell(c, shift); else if (isResult) toast('원본 화면의 칸을 클릭하세요'); return; }
+    selectCell(c, isResult);
+  };
+  wrap.addEventListener('pointerdown', e => {
+    lastType = e.pointerType; pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pointers.size === 2) {
+      revertStroke(); clearPending(); drag = null; wrap.classList.remove('dragging');
+      const [a, b] = [...pointers.values()];
+      pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, mid0: local((a.x + b.x) / 2, (a.y + b.y) / 2), s0: S.view.scale, tx0: S.view.tx, ty0: S.view.ty };
+      return;
+    }
+    if (pointers.size > 2 || !S.src) return;
+    if (e.pointerType === 'mouse') {
+      if (e.button === 1) { startDrag(e.clientX, e.clientY, true); return; }
+      if (e.button !== 0) return;
+      if (canPaint()) { if (beginStroke()) paintAt(e.clientX, e.clientY); return; }
+      startDrag(e.clientX, e.clientY, false); return;
+    }
+    pending = { x: e.clientX, y: e.clientY, mode: canPaint() ? 'paint' : 'pan', shift: e.shiftKey };
+    lpTimer = setTimeout(() => { const p = pending; pending = null; lpTimer = null; if (!p || S.picking) return; eyedrop(toCellXY(wrap, p.x, p.y)); }, 450);
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch) {
+      if (pointers.size < 2) return; const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, mid = local((a.x + b.x) / 2, (a.y + b.y) / 2);
+      const s = Math.min(200, Math.max(0.02, pinch.s0 * d / pinch.d0)); const px = (pinch.mid0.x - pinch.tx0) / pinch.s0, py = (pinch.mid0.y - pinch.ty0) / pinch.s0;
+      S.view.scale = s; S.view.tx = mid.x - px * s; S.view.ty = mid.y - py * s; draw(); return;
+    }
+    if (pending) {
+      if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) < 7) return;
+      const p = pending; clearPending();
+      if (p.mode === 'paint') { if (beginStroke()) { paintAt(p.x, p.y); paintAt(e.clientX, e.clientY); } }
+      else { startDrag(p.x, p.y, true); S.view.tx = drag.tx + (e.clientX - drag.x); S.view.ty = drag.ty + (e.clientY - drag.y); draw(); }
+      return;
+    }
+    if (stroke) { paintAt(e.clientX, e.clientY); return; }
+    if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 3) { drag.moved = true; wrap.classList.add('dragging'); } if (drag.moved) { S.view.tx = drag.tx + dx; S.view.ty = drag.ty + dy; draw(); } return; }
+    if (!S.src || e.pointerType !== 'mouse') return;
+    const c = toCell(wrap, e); const changed = (c && S.hover) ? (c.i !== S.hover.i || c.j !== S.hover.j) : (c !== S.hover);
+    if (changed) { S.hover = c; $('hoverInfo').textContent = c ? `칸 (${c.i}, ${c.j})${S.cellA && S.cellA[c.j * S.W + c.i] ? ' ' + hex(cellRGBAt(c.j * S.W + c.i)) : ''}` : ''; draw(); }
+  });
+  const finish = e => {
+    pointers.delete(e.pointerId);
+    if (pinch) { if (pointers.size < 2) pinch = null; return; }
+    if (pending) { const p = pending; clearPending(); if (e.type === 'pointercancel' || !S.src) return;
+      if (p.mode === 'paint') { if (beginStroke()) { paintAt(p.x, p.y); endStroke(); } } else tapSelect(p.x, p.y, p.shift); return; }
+    if (stroke) { endStroke(); return; }
+    if (!drag) return; const moved = drag.moved; drag = null; wrap.classList.remove('dragging');
+    if (!moved && S.src && e.type !== 'pointercancel') tapSelect(e.clientX, e.clientY, e.shiftKey);
+  };
+  wrap.addEventListener('pointerup', finish); wrap.addEventListener('pointercancel', finish);
+  wrap.addEventListener('pointerleave', () => { if (S.hover) { S.hover = null; $('hoverInfo').textContent = ''; draw(); } });
+  wrap.addEventListener('contextmenu', e => {
+    e.preventDefault(); if (!S.src || !S.finalIdx) return;
+    if (S.picking) { setPicking(false); return; }
+    if (lastType !== 'mouse') return;
+    const c = toCell(wrap, e); if (!c) return;
+    if (S.tool === 'select') { if (!isResult) return; const k = c.j * S.W + c.i; if (S.overrides.get(k) !== undefined) { toast('직접 지정한 칸입니다. 아래 "직접 지정 해제"로 되돌리세요'); return; } const idx = S.finalIdx[k]; if (idx >= 0) { S.sel = c; toggleRemove(idx); } }
+    else eyedrop(c);
+  });
+}
+
+/* ======================= settings binding ======================= */
+let timer = null;
+function schedule() { if (!S.auto) return; clearTimeout(timer); timer = setTimeout(recompute, 250); }
+function syncVisibility() {
+  const m = S.set.gridMode; $('grid-auto').hidden = m !== 'auto'; $('grid-manual').hidden = m !== 'manual'; $('grid-fixed').hidden = m !== 'fixed';
+  $('row-ncolors').hidden = !(S.set.palMode === 'kmeans' || S.set.palMode === 'mediancut'); $('row-oklch').hidden = S.set.palMode !== 'oklch';
+}
+document.querySelectorAll('[data-set]').forEach(el => {
+  const key = el.dataset.set, v = S.set[key];
+  if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  const read = () => { if (el.type === 'checkbox') return el.checked; if (el.type === 'number') { const n = parseFloat(el.value); if (!isFinite(n)) return S.set[key]; return Math.min(+el.max, Math.max(+el.min, n)); } return el.value; };
+  el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => { S.set[key] = read(); syncVisibility(); schedule(); });
+});
+document.querySelectorAll('[data-set]').forEach(el => { const key = el.dataset.set; if (el.type === 'checkbox') S.set[key] = el.checked; else if (el.type === 'number') { const n = parseFloat(el.value); if (isFinite(n)) S.set[key] = n; } else S.set[key] = el.value; });
+syncVisibility();
+$('toManual').addEventListener('click', () => {
+  if (!S.found) return; S.set.gridMode = 'manual'; S.set.cellSize = S.found.s; S.set.offX = S.found.ox; S.set.offY = S.found.oy;
+  for (const [k, v] of [['gridMode', 'manual'], ['cellSize', S.found.s], ['offX', S.found.ox], ['offY', S.found.oy]]) { const el = document.querySelector(`[data-set="${k}"]`); if (el) el.value = v; }
+  syncVisibility(); recompute();
+});
+$('apply').addEventListener('click', recompute);
+$('auto').addEventListener('change', e => { S.auto = e.target.checked; });
+$('grid').addEventListener('change', e => { S.showGrid = e.target.checked; draw(); });
+$('fit').addEventListener('click', fitView);
+$('toggleSettings').addEventListener('click', () => { $('settings').hidden = !$('settings').hidden; sizeCanvases(); });
+S.auto = $('auto').checked; S.showGrid = $('grid').checked;
+
+/* ======================= export ======================= */
+let exportBlob = null;
+$('exportBtn').addEventListener('click', () => {
+  if (!S.resImg) return;
+  const k = +$('scale').value;
+  const c = document.createElement('canvas'); c.width = S.W * k; c.height = S.H * k; const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.drawImage(S.resCanvas, 0, 0, c.width, c.height);
+  $('exportImg').src = c.toDataURL('image/png'); $('exportImg').style.width = Math.min(800, c.width) + 'px';
+  $('exportTitle').textContent = `PNG ${c.width}×${c.height}px`; $('copyMsg').textContent = ''; $('exportOverlay').hidden = false;
+  c.toBlob(b => { exportBlob = b; }, 'image/png');
+});
+$('closeExport').addEventListener('click', () => { $('exportOverlay').hidden = true; });
+$('exportOverlay').addEventListener('click', e => { if (e.target === $('exportOverlay')) $('exportOverlay').hidden = true; });
+$('copyBtn').addEventListener('click', async () => {
+  try { if (!exportBlob || !navigator.clipboard || !window.ClipboardItem) throw new Error('unsupported'); await navigator.clipboard.write([new ClipboardItem({ 'image/png': exportBlob })]); $('copyMsg').textContent = '복사했습니다.'; }
+  catch (err) { $('copyMsg').textContent = '이 환경에서는 복사가 막혀 있습니다. 이미지를 우클릭해 저장하세요.'; }
+});
+
+/* ======================= sample: an "AI-looking" pixel image with uneven 9px cells, soft edges and a flat background ======================= */
+function sampleImage() {
+  const W = 40, H = 46, px = 9, c = document.createElement('canvas'); c.width = W * px + 40; c.height = H * px + 40; const g = c.getContext('2d');
+  g.fillStyle = '#f2efe6'; g.fillRect(0, 0, c.width, c.height);
+  const seed = 7; let r = seed; const rnd = () => { r = (r * 1103515245 + 12345) & 0x7fffffff; return r / 0x7fffffff; };
+  // draw a chick: body, eyes, beak, feet, on a 40x46 pixel grid, each "pixel" drawn as a slightly uneven square
+  const body = (x, y) => { const dx = (x - 20) / 15, dy = (y - 24) / 17; return dx * dx + dy * dy <= 1; };
+  const head = (x, y) => { const dx = (x - 20) / 10, dy = (y - 13) / 9; return dx * dx + dy * dy <= 1; };
+  const belly = (x, y) => { const dx = (x - 20) / 9, dy = (y - 29) / 9; return dx * dx + dy * dy <= 1; };
+  const eye = (x, y) => (Math.hypot(x - 16, y - 12) <= 1.6) || (Math.hypot(x - 24, y - 12) <= 1.6);
+  const glint = (x, y) => (x === 15 && y === 11) || (x === 23 && y === 11);
+  const beak = (x, y) => y >= 14 && y <= 17 && Math.abs(x - 20) <= (17 - y);
+  const cheek = (x, y) => Math.hypot(x - 12, y - 15) <= 2 || Math.hypot(x - 28, y - 15) <= 2;
+  const feet = (x, y) => y >= 41 && y <= 44 && ((x >= 13 && x <= 17) || (x >= 23 && x <= 27)) && (y === 41 || (x % 2 === 1));
+  const wing = (x, y) => { const dx = (x - 9) / 4, dy = (y - 26) / 7; return dx * dx + dy * dy <= 1; } ;
+  const wing2 = (x, y) => { const dx = (x - 31) / 4, dy = (y - 26) / 7; return dx * dx + dy * dy <= 1; };
+  const inside = (x, y) => body(x, y) || head(x, y);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let col = null;
+    if (feet(x, y)) col = '#e58a1f';
+    else if (inside(x, y)) {
+      const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+      col = edge ? '#2b1d12' : belly(x, y) ? '#fff3c2' : (wing(x, y) || wing2(x, y)) ? '#e9b53a' : y > 30 ? '#f0c23f' : '#f7d24c';
+      if (glint(x, y)) col = '#ffffff'; else if (eye(x, y)) col = '#2b1d12'; else if (beak(x, y)) col = '#f08a1d'; else if (cheek(x, y)) col = '#f3a2a0';
+    }
+    if (!col) continue;
+    // uneven cell size + slight position jitter + soft blur-like edge
+    const jx = (rnd() - 0.5) * 1.2, jy = (rnd() - 0.5) * 1.2, sz = px + (rnd() - 0.5) * 1.5;
+    g.fillStyle = col; g.fillRect(20 + x * px + jx, 20 + y * px + jy, sz, sz);
+  }
+  const blurred = document.createElement('canvas'); blurred.width = c.width; blurred.height = c.height; const bg = blurred.getContext('2d');
+  bg.filter = 'blur(0.6px)'; bg.drawImage(c, 0, 0);
+  const im = new Image(); im.onload = () => loadFromSource(im, '예시 (AI 느낌의 9px 도트)'); im.src = blurred.toDataURL();
+}
+window.__pm = S;
+sizeCanvases();
+sampleImage();
+})();
+</script>
