@@ -1,6 +1,6 @@
 # Pipeline reference
 
-How each stage of `assets/pixel-mosaic.html` works, and why. Read the stage you are about to change.
+How each stage of `assets/pixel-changer.html` works, and why. Read the stage you are about to change.
 
 ## Contents
 

@@ -1,11 +1,11 @@
 ---
-name: pixel-mosaic
-description: Turn an AI-generated or ordinary image into clean pixel art with a bundled single-file browser tool (automatic pixel-grid detection, background removal, per-cell color picking, palette reduction, color remove and pin, manual painting, PNG export). Use this whenever the user wants to pixelate an image, clean up "pixel-looking" AI art that has uneven pixel sizes, blurry edges or hundreds of colors, convert a picture into a sprite or dot art, snap an image to a grid with a limited palette, or mentions 도트, 픽셀 아트 변환, 모자이크, "AI 그림 픽셀로 정리" or a Chickxel-style pixelate feature, even if they never ask for a tool by name. Also use it to explain or tune the tool's settings, to diagnose a bad conversion, or to change the tool's code.
+name: pixel-changer
+description: Turn an AI-generated or ordinary image into clean pixel art with a bundled single-file browser tool (automatic pixel-grid detection, background removal, per-cell color picking, palette reduction, color remove and pin, manual painting, PNG export). Use this whenever the user wants to pixelate an image, clean up "pixel-looking" AI art that has uneven pixel sizes, blurry edges or hundreds of colors, convert a picture into a sprite or dot art, snap an image to a grid with a limited palette, or mentions 도트, 픽셀 아트 변환, 모자이크 or "AI 그림 픽셀로 정리", even if they never ask for a tool by name. Also use it to explain or tune the tool's settings, to diagnose a bad conversion, or to change the tool's code.
 ---
 
-# Pixel Mosaic
+# Pixel Changer
 
-A single HTML file, `assets/pixel-mosaic.html`, that converts an image into pixel art in the browser. Nothing is uploaded and there is no build step or dependency. The user loads an image, the tool finds the pixel grid, and the result appears next to the source for cell-by-cell comparison.
+A single HTML file, `assets/pixel-changer.html`, that converts an image into pixel art in the browser. Nothing is uploaded and there is no build step or dependency. The user loads an image, the tool finds the pixel grid, and the result appears next to the source for cell-by-cell comparison.
 
 It exists because AI image models draw "pixel art" that is not on a grid: the pixels are 7 to 9 px wide instead of a constant size, edges are blurred, and there are hundreds of near-duplicate colors. Downscaling such an image gives mush. This tool recovers the grid the image was meant to have and picks one color per cell.
 
@@ -13,7 +13,7 @@ It exists because AI image models draw "pixel art" that is not on a grid: the pi
 
 Do not regenerate the tool from memory. The bundled file is tested, and a rewrite will lose behavior that took several rounds to get right. Hand over the file as it is.
 
-- **If you can publish an Artifact:** copy `assets/pixel-mosaic.html` into your working directory and publish that copy. The file already follows the Artifact page contract: it has no doctype, `html` or `body` tags, the `<title>` is at the top, and every color is a theme token with light and dark values.
+- **If you can publish an Artifact:** copy `assets/pixel-changer.html` into your working directory and publish that copy. The file already follows the Artifact page contract: it has no doctype, `html` or `body` tags, the `<title>` is at the top, and every color is a theme token with light and dark values.
 - **Otherwise:** copy the file into a folder the user chooses and tell them to open it in a browser by double-clicking it. It works offline. Only the two web fonts need a connection, and system fonts take over without them.
 
 Tell the user which one to prefer for saving. Inside the Artifact viewer, downloads and clipboard image copy can be blocked, so "PNG 만들기" shows the image for a right-click save. The local file has no such limit.
@@ -84,4 +84,3 @@ Load the page over `http://localhost`, since some browser tools refuse `file://`
 
 Say so plainly when a request falls outside what the tool does. It has no preset candidates with scores, no automatic parameter search, no 1 px outline fitting, no sprite-sheet frame splitting, no dithering, and no batch or command-line mode. Images larger than 1600 px on the long side are scaled down on load.
 
-The tool was written independently, with the workflow of Chickxel's "AI 그림 픽셀로 정리" feature as its reference. It shares no code with Chickxel and is not affiliated with it.

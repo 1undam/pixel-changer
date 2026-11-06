@@ -1,8 +1,8 @@
-# pixel-chager
+# pixel-changer
 
-AI가 그린 "픽셀 느낌" 그림이나 일반 이미지를 깨끗한 픽셀 아트로 바꾸는 브라우저 도구와, 그 도구를 Claude가 쓸 수 있게 묶은 스킬(`pixel-mosaic`)입니다.
+**한국어** | [English](README.en.md) | [日本語](README.ja.md)
 
-A Claude skill (`pixel-mosaic`) that bundles a single-file browser tool for turning AI-generated or ordinary images into clean pixel art.
+AI가 그린 "픽셀 느낌" 그림이나 일반 이미지를 깨끗한 픽셀 아트로 바꾸는 브라우저 도구와, 그 도구를 Claude가 쓸 수 있게 묶은 스킬(`pixel-changer`)입니다.
 
 ## 무엇을 하나요
 
@@ -24,16 +24,16 @@ AI 이미지 모델이 그린 도트 그림은 실제로는 격자에 맞지 않
 
 ### 도구만 쓰기
 
-[`pixel-mosaic/assets/pixel-mosaic.html`](pixel-mosaic/assets/pixel-mosaic.html) 파일을 내려받아 브라우저에서 엽니다. 인터넷 연결 없이도 동작합니다.
+[`pixel-changer/assets/pixel-changer.html`](pixel-changer/assets/pixel-changer.html) 파일을 내려받아 브라우저에서 엽니다. 인터넷 연결 없이도 동작합니다.
 
 ### Claude 스킬로 설치
 
-`pixel-mosaic` 폴더를 스킬 폴더에 복사합니다.
+`pixel-changer` 폴더를 스킬 폴더에 복사합니다.
 
 | 범위 | 위치 |
 |---|---|
-| 내 모든 프로젝트 | `~/.claude/skills/pixel-mosaic/` |
-| 한 프로젝트만 | `<프로젝트>/.claude/skills/pixel-mosaic/` |
+| 내 모든 프로젝트 | `~/.claude/skills/pixel-changer/` |
+| 한 프로젝트만 | `<프로젝트>/.claude/skills/pixel-changer/` |
 
 설치하면 "이 그림 도트로 바꿔줘" 같은 요청에 Claude가 이 도구를 꺼내 쓰고, 변환이 이상할 때 어떤 값을 바꿔야 하는지 안내합니다.
 
@@ -184,21 +184,17 @@ AI 이미지 모델이 그린 도트 그림은 실제로는 격자에 맞지 않
 ## 구성
 
 ```
-pixel-mosaic/
+pixel-changer/
 ├── SKILL.md                    스킬 설명과 사용 지침
-├── assets/pixel-mosaic.html    도구 본체
+├── assets/pixel-changer.html    도구 본체
 └── references/pipeline.md      단계별 알고리즘 설명
 ```
 
-각 단계가 어떻게 계산되는지는 [`pixel-mosaic/references/pipeline.md`](pixel-mosaic/references/pipeline.md)에 있습니다.
+각 단계가 어떻게 계산되는지는 [`pixel-changer/references/pipeline.md`](pixel-changer/references/pipeline.md)에 있습니다.
 
 ## 없는 기능
 
 프리셋 후보 비교와 점수, 자동 최적화, 외곽선 1px 맞추기, 스프라이트 시트 프레임 나누기, 디더링, 일괄 변환은 없습니다. 긴 쪽이 1600px을 넘는 이미지는 불러올 때 축소됩니다.
-
-## 참고
-
-[Chickxel](https://chickxel.com/)의 "AI 그림 픽셀로 정리" 기능의 작업 흐름을 참고해 독립적으로 구현했습니다. Chickxel의 코드를 사용하지 않았고 Chickxel과 관련이 없습니다.
 
 ## 라이선스
 
