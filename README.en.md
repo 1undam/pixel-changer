@@ -165,7 +165,7 @@ Cells you edited by hand stay when you change settings and convert again. They a
 
 ### 8. Export
 
-Under **내보내기** (Export), choose a scale and press **PNG 만들기** (Make PNG). ×1 is the result pixel for pixel, and ×8 makes each pixel 8×8. Right-click the image to save it, or press **클립보드로 복사** (Copy to clipboard).
+Under **내보내기** (Export), choose a scale and press **PNG 만들기** (Make PNG). ×1 is the result pixel for pixel, and ×8 makes each pixel 8×8. In the preview, press **PNG 저장** (Save PNG) to choose where to save and under what name. The suggested name has the form `source-name_WxH_xScale.png`. **클립보드로 복사** (Copy to clipboard) lets you paste straight into another program.
 
 For a game sprite, export at ×1 and set the texture filter to Point in the engine.
 

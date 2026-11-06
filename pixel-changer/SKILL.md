@@ -16,7 +16,7 @@ Do not regenerate the tool from memory. The bundled file is tested, and a rewrit
 - **If you can publish an Artifact:** copy `assets/pixel-changer.html` into your working directory and publish that copy. The file already follows the Artifact page contract: it has no doctype, `html` or `body` tags, the `<title>` is at the top, and every color is a theme token with light and dark values.
 - **Otherwise:** copy the file into a folder the user chooses and tell them to open it in a browser by double-clicking it. It works offline. Only the two web fonts need a connection, and system fonts take over without them.
 
-Tell the user which one to prefer for saving. Inside the Artifact viewer, downloads and clipboard image copy can be blocked, so "PNG 만들기" shows the image for a right-click save. The local file has no such limit.
+Saving works in both. The export preview has a "PNG 저장" button that tries, in order, the Artifact host's save prompt, the browser's save dialog, and a plain download. A page inside the Artifact viewer cannot download by itself, so when you publish it, declare `capabilities: {downloads: true}`. Without that grant the button has nothing to call, and the user is left with right-click save on the preview image.
 
 The user supplies the image in the page: the "이미지 열기" button, paste with Ctrl+V, or drag and drop. The page opens with a built-in sample so its behavior is visible before any image is loaded.
 

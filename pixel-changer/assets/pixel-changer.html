@@ -268,9 +268,9 @@ select{width:auto;font-family:var(--ui)}
 
 <div class="overlay" id="exportOverlay" hidden>
   <div class="sheet">
-    <div class="row"><b id="exportTitle">PNG</b><span class="hint">이미지를 우클릭해 저장하거나 복사하세요.</span></div>
+    <div class="row"><b id="exportTitle">PNG</b><span class="hint mono" id="exportName"></span></div>
     <img id="exportImg" alt="변환된 픽셀 이미지">
-    <div class="row"><button id="copyBtn">클립보드로 복사</button><button id="closeExport">닫기</button><span class="hint" id="copyMsg"></span></div>
+    <div class="row"><button id="saveBtn" class="primary">PNG 저장</button><button id="copyBtn">클립보드로 복사</button><button id="closeExport">닫기</button><span class="hint" id="copyMsg"></span></div>
   </div>
 </div>
 
@@ -335,6 +335,8 @@ function loadFromSource(imgEl, name) {
   S.src = ctx.getImageData(0, 0, w, h); S.srcW = w; S.srcH = h; S.srcCanvas = c;
   S.overrides.clear(); S.undo.length = 0; S.removed.clear(); S.fixed = []; S.sel = null; S.focusIdx = -1; S.brush = null; S.picking = false;
   $('srcInfo').textContent = `${w}×${h}px` + (name ? ` · ${name}` : '');
+  // base name for saved files: the loaded file's name without its extension
+  S.srcName = name && /\.[a-z0-9]{2,5}$/i.test(name) ? name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 80) : 'pixel-changer';
   fitViewLater = true;
   recompute();
 }
@@ -1025,19 +1027,47 @@ $('toggleSettings').addEventListener('click', () => { $('settings').hidden = !$(
 S.auto = $('auto').checked; S.showGrid = $('grid').checked;
 
 /* ======================= export ======================= */
-let exportBlob = null;
+let exportBlob = null, exportReady = Promise.resolve(null), exportFile = 'pixel-changer.png';
+// Inside a Claude artifact the page cannot download by itself: the host's "downloads" capability shows a save prompt instead.
+// Looked up once at startup so the answer is ready by the time the button is pressed; null everywhere else.
+const hostDownloads = (window.claude && typeof window.claude.use === 'function') ? Promise.resolve(window.claude.use('downloads')).catch(() => null) : Promise.resolve(null);
 $('exportBtn').addEventListener('click', () => {
   if (!S.resImg) return;
   const k = +$('scale').value;
   const c = document.createElement('canvas'); c.width = S.W * k; c.height = S.H * k; const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.drawImage(S.resCanvas, 0, 0, c.width, c.height);
   $('exportImg').src = c.toDataURL('image/png'); $('exportImg').style.width = Math.min(800, c.width) + 'px';
-  $('exportTitle').textContent = `PNG ${c.width}×${c.height}px`; $('copyMsg').textContent = ''; $('exportOverlay').hidden = false;
-  c.toBlob(b => { exportBlob = b; }, 'image/png');
+  exportFile = `${S.srcName || 'pixel-changer'}_${S.W}x${S.H}${k > 1 ? `_x${k}` : ''}.png`;
+  $('exportTitle').textContent = `PNG ${c.width}×${c.height}px`; $('exportName').textContent = exportFile; $('copyMsg').textContent = ''; $('exportOverlay').hidden = false;
+  exportBlob = null; exportReady = new Promise(res => c.toBlob(b => { exportBlob = b; res(b); }, 'image/png'));
+});
+$('saveBtn').addEventListener('click', async () => {
+  const say = t => { $('copyMsg').textContent = t; };
+  await exportReady; if (!exportBlob) { say('이미지를 만들지 못했습니다. 다시 PNG 만들기를 눌러 주세요.'); return; }
+  const blocked = '이 환경에서는 저장이 막혀 있습니다. 이미지를 우클릭해 저장하세요.';
+  // 1) Claude artifact: ask the host to save
+  const dl = await Promise.race([hostDownloads, new Promise(r => setTimeout(() => r(null), 1500))]);
+  if (dl) {
+    try { await dl.save({ filename: exportFile, data: exportBlob }); say('저장했습니다.'); }
+    catch (err) { say(err && err.code === 'declined' ? '저장을 취소했습니다.' : err && err.code === 'rate_limited' ? '저장 창이 이미 열려 있습니다.' : blocked); }
+    return;
+  }
+  // 2) browsers with a save dialog (lets the user choose folder and name)
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: exportFile, types: [{ description: 'PNG', accept: { 'image/png': ['.png'] } }] });
+      const w = await h.createWritable(); await w.write(exportBlob); await w.close(); say('저장했습니다.'); return;
+    } catch (err) { if (err && err.name === 'AbortError') { say('저장을 취소했습니다.'); return; } /* not allowed here: fall through to a plain download */ }
+  }
+  // 3) plain download into the browser's download folder
+  try {
+    const url = URL.createObjectURL(exportBlob); const a = document.createElement('a'); a.href = url; a.download = exportFile; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000); say('다운로드를 시작했습니다. 반응이 없으면 이미지를 우클릭해 저장하세요.');
+  } catch (err) { say(blocked); }
 });
 $('closeExport').addEventListener('click', () => { $('exportOverlay').hidden = true; });
 $('exportOverlay').addEventListener('click', e => { if (e.target === $('exportOverlay')) $('exportOverlay').hidden = true; });
 $('copyBtn').addEventListener('click', async () => {
-  try { if (!exportBlob || !navigator.clipboard || !window.ClipboardItem) throw new Error('unsupported'); await navigator.clipboard.write([new ClipboardItem({ 'image/png': exportBlob })]); $('copyMsg').textContent = '복사했습니다.'; }
+  try { await exportReady; if (!exportBlob || !navigator.clipboard || !window.ClipboardItem) throw new Error('unsupported'); await navigator.clipboard.write([new ClipboardItem({ 'image/png': exportBlob })]); $('copyMsg').textContent = '복사했습니다.'; }
   catch (err) { $('copyMsg').textContent = '이 환경에서는 복사가 막혀 있습니다. 이미지를 우클릭해 저장하세요.'; }
 });
 
